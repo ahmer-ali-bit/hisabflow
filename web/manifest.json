@@ -1,0 +1,12 @@
+{
+  "name": "HisabFlow",
+  "short_name": "HisabFlow",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0D1517",
+  "theme_color": "#101A1C",
+  "description": "Offline-first customer ledgers and daily accounts.",
+  "icons": [
+    {"src": "icons/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}
