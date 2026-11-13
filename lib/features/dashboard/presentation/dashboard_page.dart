@@ -24,6 +24,8 @@ class _DashboardPageState extends State<DashboardPage> {
   final _repository = LocalLedgerRepository();
   final _notesController = TextEditingController();
   final _companyNameController = TextEditingController();
+  final _notesFocusNode = FocusNode();
+  final _companyNameFocusNode = FocusNode();
   int _selected = 0;
   String _query = '';
   String _summaryQuery = '';
@@ -50,6 +52,8 @@ class _DashboardPageState extends State<DashboardPage> {
   void dispose() {
     _notesController.dispose();
     _companyNameController.dispose();
+    _notesFocusNode.dispose();
+    _companyNameFocusNode.dispose();
     super.dispose();
   }
 
@@ -81,8 +85,8 @@ class _DashboardPageState extends State<DashboardPage> {
         _companyLogoData = workspace['companyLogo'] as String?;
         _loading = false;
       });
-      if (!_notesController.hasFocus) _notesController.text = '${workspace['notes'] ?? ''}';
-      if (!_companyNameController.hasFocus) _companyNameController.text = '${workspace['companyName'] ?? ''}';
+      if (!_notesFocusNode.hasFocus) _notesController.text = '${workspace['notes'] ?? ''}';
+      if (!_companyNameFocusNode.hasFocus) _companyNameController.text = '${workspace['companyName'] ?? ''}';
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -420,7 +424,7 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 14),
         LayoutBuilder(builder: (context, constraints) {
           final columns = constraints.maxWidth >= 760 ? 3 : 1;
-          final gap = 10.0;
+          const gap = 10.0;
           final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
           return Wrap(spacing: gap, runSpacing: gap, children: [
             SizedBox(width: width, child: _summaryTotalCard('Overall debit / buy', overallDebit, BrandColors.teal)),
@@ -781,7 +785,7 @@ class _DashboardPageState extends State<DashboardPage> {
             else
               ClipRRect(borderRadius: BorderRadius.circular(13), child: Image.memory(base64Decode(_companyLogoData!.split(',').last), width: 54, height: 54, fit: BoxFit.cover)),
             const SizedBox(width: 12),
-            Expanded(child: TextField(controller: _companyNameController, decoration: const InputDecoration(labelText: 'Company name'))),
+            Expanded(child: TextField(controller: _companyNameController, focusNode: _companyNameFocusNode, decoration: const InputDecoration(labelText: 'Company name'))),
           ]),
           const SizedBox(height: 12),
           Wrap(spacing: 8, children: [
@@ -797,7 +801,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Workspace notes', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 11),
-          TextField(controller: _notesController, minLines: 3, maxLines: 7, decoration: const InputDecoration(hintText: 'Add private reminders for this workspace…')),
+          TextField(controller: _notesController, focusNode: _notesFocusNode, minLines: 3, maxLines: 7, decoration: const InputDecoration(hintText: 'Add private reminders for this workspace…')),
           const SizedBox(height: 10),
           Wrap(spacing: 8, children: [
             FilledButton.icon(onPressed: _saveNotes, icon: const Icon(Icons.save_outlined), label: const Text('Save notes')),

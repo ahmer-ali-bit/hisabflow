@@ -32,6 +32,7 @@ class EncryptedVault implements VaultStore {
     return SecretKey(base64Decode(encoded));
   }
 
+  @override
   Future<void> write(Map<String, Object?> document) async {
     final nonce = _cipher.newNonce();
     final box = await _cipher.encrypt(utf8.encode(jsonEncode(document)), secretKey: await _key(), nonce: nonce);
@@ -43,6 +44,7 @@ class EncryptedVault implements VaultStore {
     }));
   }
 
+  @override
   Future<Map<String, dynamic>?> read() async {
     final content = await storage.readEnvelope();
     if (content == null) return null;

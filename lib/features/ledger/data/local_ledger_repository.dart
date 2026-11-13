@@ -456,8 +456,8 @@ class LocalLedgerRepository {
       return entry.dailyLogVisible && customerById.containsKey(entry.customerId) &&
           !alreadySnapshotted.contains(entry.id) && !entry.createdAt.isAfter(current);
     }).toList();
-    var debit = previous == null ? (double.tryParse('${workspace['dailyLogOpeningDebit'] ?? 0}') ?? 0) : (previous.finalBalance > 0 ? previous.finalBalance : 0);
-    var credit = previous == null ? (double.tryParse('${workspace['dailyLogOpeningCredit'] ?? 0}') ?? 0) : (previous.finalBalance < 0 ? -previous.finalBalance : 0);
+    var debit = previous == null ? (double.tryParse('${workspace['dailyLogOpeningDebit'] ?? 0}') ?? 0.0) : (previous.finalBalance > 0 ? previous.finalBalance : 0.0);
+    var credit = previous == null ? (double.tryParse('${workspace['dailyLogOpeningCredit'] ?? 0}') ?? 0.0) : (previous.finalBalance < 0 ? -previous.finalBalance : 0.0);
     final customerIds = <String>{};
     for (final entry in periodEntries) {
       final customer = customerById[entry.customerId]!;
