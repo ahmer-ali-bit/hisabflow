@@ -7,7 +7,7 @@
 - [x] Stock and weight ledger calculations and opening balances
 - [x] Ledger year creation, selection, deletion and balance carry-forward
 - [x] Daily-log opening balances, snapshots, visibility controls and snapshot recalculation
-- [x] JSON workspace backup/restore and active-year CSV export
+- [x] JSON workspace backup/restore, formula-safe active-year CSV export and customer statement PDF printing
 - [x] Workspace switching, company profile and private notes
 
 ## Before a production release

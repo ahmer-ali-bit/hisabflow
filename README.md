@@ -14,7 +14,7 @@ flutter test
 flutter run -d chrome
 ```
 
-The app now includes a responsive overview, customer and ledger-entry management, ledger filters and balances, opening balances, stock/weight ledgers, independent local workspaces, year carry-forward, daily-log snapshots, workspace notes and company profile, encrypted local storage, JSON backup/restore and active-year CSV export. See the release checklist for platform-specific work still in progress. Flutter analysis, tests and target-platform builds must pass before release.
+The app now includes a responsive overview, customer and ledger-entry management, ledger filters and balances, opening balances, stock/weight ledgers, independent local workspaces, year carry-forward, daily-log snapshots, workspace notes and company profile, encrypted local storage, JSON backup/restore, active-year CSV export and customer statement PDF printing. See the release checklist for platform-specific work still in progress. Flutter analysis, tests and target-platform builds must pass before release.
 
 ## Structure
 

@@ -4,9 +4,11 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:printing/printing.dart';
 
 import '../../../app/theme.dart';
 import '../../ledger/data/ledger_backup_importer.dart';
+import '../../ledger/data/ledger_pdf_exporter.dart';
 import '../../ledger/data/local_ledger_repository.dart';
 import '../../ledger/domain/customer.dart';
 import '../../ledger/domain/daily_log_snapshot.dart';
@@ -936,6 +938,7 @@ class _DashboardPageState extends State<DashboardPage> {
             Text('${customer.isStockLedger ? 'Stock' : 'General'} ledger · ${filtered.length} entries', style: Theme.of(context).textTheme.labelMedium),
           ])),
           IconButton(onPressed: () { Navigator.pop(dialogContext); _editOpeningBalance(customer); }, icon: const Icon(Icons.account_balance_wallet_outlined), tooltip: 'Opening balance'),
+          IconButton(onPressed: () { Navigator.pop(dialogContext); _printLedger(customer, filtered); }, icon: const Icon(Icons.print_outlined), tooltip: 'Print statement'),
           IconButton(onPressed: () { Navigator.pop(dialogContext); _addEntry(initialCustomer: customer); }, icon: const Icon(Icons.add_circle_outline), tooltip: 'New entry'),
         ]),
         content: SizedBox(
@@ -1082,6 +1085,23 @@ class _DashboardPageState extends State<DashboardPage> {
       _showMessage('Opening balance saved.');
     } catch (error) {
       _showMessage('Could not save opening balance: $error');
+    }
+  }
+
+  Future<void> _printLedger(LedgerCustomer customer, List<LedgerEntry> entries) async {
+    try {
+      final bytes = await LedgerPdfExporter().buildCustomerStatement(
+        customer: customer,
+        entries: entries,
+        companyName: _companyNameController.text,
+      );
+      final safeName = customer.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
+      await Printing.layoutPdf(
+        name: 'hisabflow-${safeName.isEmpty ? 'ledger' : safeName}-${customer.year}.pdf',
+        onLayout: (_) async => bytes,
+      );
+    } catch (error) {
+      _showMessage('Could not prepare the statement: $error');
     }
   }
 
