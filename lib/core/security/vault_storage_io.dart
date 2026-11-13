@@ -17,7 +17,8 @@ Future<void> writeEnvelope(String value) async {
   final file = await _file();
   final temporary = File('${file.path}.tmp');
   await temporary.writeAsString(value, flush: true);
-  if (await file.exists()) await file.delete();
+  // Renaming over the existing file is atomic on the same filesystem. Never
+  // delete the old vault first: a crash in between would destroy the only copy.
   await temporary.rename(file.path);
 }
 

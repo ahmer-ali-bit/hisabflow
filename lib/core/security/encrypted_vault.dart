@@ -4,12 +4,13 @@ import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'vault_store.dart';
 import 'vault_storage_stub.dart'
     if (dart.library.io) 'vault_storage_io.dart'
     if (dart.library.html) 'vault_storage_web.dart' as storage;
 
 /// AES-256-GCM vault; its encryption key is held in platform secure storage.
-class EncryptedVault {
+class EncryptedVault implements VaultStore {
   EncryptedVault({FlutterSecureStorage? secureStorage})
       : _secureStorage = secureStorage ?? const FlutterSecureStorage(
           // Use the macOS login keychain for local/dev builds; the Data Protection

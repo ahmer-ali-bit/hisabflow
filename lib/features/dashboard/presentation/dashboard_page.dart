@@ -9,6 +9,7 @@ import '../../../app/theme.dart';
 import '../../ledger/data/ledger_backup_importer.dart';
 import '../../ledger/data/local_ledger_repository.dart';
 import '../../ledger/domain/customer.dart';
+import '../../ledger/domain/daily_log_snapshot.dart';
 import '../../ledger/domain/ledger_calculator.dart';
 import '../../ledger/domain/ledger_entry.dart';
 
@@ -21,13 +22,23 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   final _repository = LocalLedgerRepository();
+  final _notesController = TextEditingController();
+  final _companyNameController = TextEditingController();
   int _selected = 0;
   String _query = '';
   String _summaryQuery = '';
   int _activeYear = DateTime.now().year;
+  String _activeWorkspaceId = 'default-workspace';
+  String _workspaceName = 'My workspace';
+  String? _companyLogoData;
+  List<int> _years = [DateTime.now().year];
+  List<Map<String, dynamic>> _workspaces = [];
   bool _loading = true;
   List<LedgerCustomer> _customers = [];
   List<LedgerEntry> _entries = [];
+  List<DailyLogSnapshot> _snapshots = [];
+  double _dailyOpeningDebit = 0;
+  double _dailyOpeningCredit = 0;
 
   @override
   void initState() {
@@ -35,18 +46,43 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadCustomers();
   }
 
+  @override
+  void dispose() {
+    _notesController.dispose();
+    _companyNameController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadCustomers() async {
     try {
-      final customers = await _repository.customers();
-      final entries = await _repository.entries();
-      final year = await _repository.activeYear();
+      final workspaceState = await _repository.workspaceState();
+      final workspace = workspaceState.active;
+      final customers = (workspace['customers'] as List? ?? const []).whereType<Map>().map((row) => LedgerCustomer.fromJson(Map<String, dynamic>.from(row))).toList();
+      final entries = (workspace['entries'] as List? ?? const []).whereType<Map>().map((row) => LedgerEntry.fromJson(Map<String, dynamic>.from(row))).toList();
+      final year = int.tryParse('${workspace['activeYear']}') ?? DateTime.now().year;
+      final years = (workspace['years'] as List? ?? const []).map((value) => int.tryParse('$value')).whereType<int>().toSet().toList()..sort();
+      final workspaces = workspaceState.all;
+      final snapshots = (workspace['snapshots'] as List? ?? const []).whereType<Map>().map((row) => DailyLogSnapshot.fromJson(Map<String, dynamic>.from(row))).where((snapshot) => snapshot.year == year).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final openingDebit = double.tryParse('${workspace['dailyLogOpeningDebit'] ?? 0}') ?? 0;
+      final openingCredit = double.tryParse('${workspace['dailyLogOpeningCredit'] ?? 0}') ?? 0;
       if (!mounted) return;
       setState(() {
         _customers = customers;
         _entries = entries;
+        _snapshots = snapshots;
+        _dailyOpeningDebit = openingDebit;
+        _dailyOpeningCredit = openingCredit;
         _activeYear = year;
+        _years = years;
+        _workspaces = workspaces;
+        _activeWorkspaceId = '${workspace['id']}';
+        _workspaceName = '${workspace['name'] ?? 'My workspace'}';
+        _companyLogoData = workspace['companyLogo'] as String?;
         _loading = false;
       });
+      if (!_notesController.hasFocus) _notesController.text = '${workspace['notes'] ?? ''}';
+      if (!_companyNameController.hasFocus) _companyNameController.text = '${workspace['companyName'] ?? ''}';
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -115,7 +151,7 @@ class _DashboardPageState extends State<DashboardPage> {
               const SizedBox(width: 9),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('WORKSPACE', style: TextStyle(fontSize: 9, letterSpacing: 1, color: BrandColors.muted, fontWeight: FontWeight.w700)),
-                Text('My workspace', style: Theme.of(context).textTheme.titleMedium),
+                Text(_workspaceName, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium),
               ])),
               const Icon(Icons.expand_more, size: 18, color: BrandColors.muted),
             ]),
@@ -176,12 +212,12 @@ class _DashboardPageState extends State<DashboardPage> {
           if (!wide) const SizedBox(width: 11),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(wide ? const ['Overview', 'Customers', 'Summary', 'Daily logs', 'Settings'][_selected] : 'HisabFlow', style: Theme.of(context).textTheme.titleLarge),
-            Text('My workspace  ·  $_activeYear', style: Theme.of(context).textTheme.labelMedium),
+            Text('$_workspaceName  ·  $_activeYear', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelMedium),
           ])),
           if (isDesktop) FilledButton.icon(onPressed: _addEntry, icon: const Icon(Icons.add_rounded), label: const Text('New entry')),
           const SizedBox(width: 8),
           IconButton(onPressed: _restoreBackup, icon: const Icon(Icons.file_upload_outlined), tooltip: 'Restore backup'),
-          IconButton(onPressed: () => _showMessage('Linked-device pairing will be available after secure server setup.'), icon: const Icon(Icons.devices_outlined), tooltip: 'Linked devices'),
+          IconButton(onPressed: () => _showMessage('Offline-first mode is active. Device sync stays disabled until secure pairing is configured.'), icon: const Icon(Icons.devices_outlined), tooltip: 'Linked devices'),
           const SizedBox(width: 4),
           const CircleAvatar(radius: 18, backgroundColor: BrandColors.mint, child: Icon(Icons.person_outline_rounded, color: BrandColors.teal, size: 20)),
         ]),
@@ -303,7 +339,7 @@ class _DashboardPageState extends State<DashboardPage> {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final filtered = _customers.where((customer) {
       final query = _query.trim().toLowerCase();
-      return query.isEmpty || customer.name.toLowerCase().split(RegExp(r'\s+')).any((word) => word.startsWith(query));
+      return customer.year == _activeYear && (query.isEmpty || customer.name.toLowerCase().split(RegExp(r'\s+')).any((word) => word.startsWith(query)));
     }).toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return Padding(
       key: const ValueKey('customers'),
@@ -441,31 +477,128 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _dailyLogsView(BuildContext context) {
-    final visible = _entries.where((entry) => entry.dailyLogVisible && _customers.any((customer) => customer.id == entry.customerId && customer.year == _activeYear)).toList()
+    final byId = {for (final customer in _customers.where((item) => item.year == _activeYear)) customer.id: customer};
+    final logs = _entries.where((entry) => byId.containsKey(entry.customerId)).toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final debitTotal = _dailyOpeningDebit + logs.where((entry) => entry.dailyLogVisible).fold<double>(0, (sum, entry) {
+      final customer = byId[entry.customerId]!;
+      return sum + (customer.isStockLedger ? entry.credit : entry.debit);
+    });
+    final creditTotal = _dailyOpeningCredit + logs.where((entry) => entry.dailyLogVisible).fold<double>(0, (sum, entry) {
+      final customer = byId[entry.customerId]!;
+      return sum + (customer.isStockLedger ? entry.debit : entry.credit);
+    });
     return Padding(
       key: const ValueKey('daily-logs'),
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Daily logs', style: Theme.of(context).textTheme.headlineMedium),
+        Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Daily logs', style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 4),
+            const Text('Ordered by entry creation time; hide entries or save closing snapshots.', style: TextStyle(color: BrandColors.muted)),
+          ])),
+          IconButton(onPressed: _editDailyOpening, tooltip: 'Edit opening balance', icon: const Icon(Icons.account_balance_wallet_outlined)),
+          PopupMenuButton<String>(
+            tooltip: 'Snapshot actions',
+            onSelected: (action) async {
+              try {
+                if (action == 'recalculate') {
+                  await _repository.recalculateSnapshots(_activeYear);
+                  await _loadCustomers();
+                  _showMessage('Snapshots recalculated.');
+                } else if (action == 'clear') {
+                  final confirm = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+                    title: const Text('Clear this year’s snapshots?'),
+                    content: const Text('Daily entries remain unchanged. This only removes saved closing snapshots.'),
+                    actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Clear snapshots'))],
+                  ));
+                  if (confirm == true) { await _repository.clearSnapshots(_activeYear); await _loadCustomers(); }
+                }
+              } catch (error) { _showMessage('$error'); }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'recalculate', child: Text('Recalculate snapshots')),
+              PopupMenuItem(value: 'clear', child: Text('Clear snapshots')),
+            ],
+          ),
+        ]),
+        const SizedBox(height: 12),
+        LayoutBuilder(builder: (context, constraints) {
+          final wide = constraints.maxWidth > 640;
+          final cardWidth = wide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth;
+          return Wrap(spacing: 12, runSpacing: 12, children: [
+            SizedBox(width: cardWidth, child: _summaryTotalCard('Daily debit · incl. opening', debitTotal, BrandColors.teal)),
+            SizedBox(width: cardWidth, child: _summaryTotalCard('Daily credit · incl. opening', creditTotal, BrandColors.gold)),
+          ]);
+        }),
+        const SizedBox(height: 12),
+        Row(children: [
+          Text('Snapshots', style: Theme.of(context).textTheme.titleLarge),
+          const Spacer(),
+          FilledButton.icon(onPressed: _saveDailySnapshot, icon: const Icon(Icons.bookmark_add_outlined), label: const Text('Save closing')),
+        ]),
+        if (_snapshots.isEmpty)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No snapshots saved yet.', style: TextStyle(color: BrandColors.muted)))
+        else
+          SizedBox(height: 116, child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _snapshots.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (context, index) {
+              final snapshot = _snapshots[index];
+              final time = snapshot.createdAt.toLocal();
+              final timestamp = '${time.day.toString().padLeft(2, '0')}/${time.month.toString().padLeft(2, '0')}/${time.year} · ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+              return SizedBox(width: 245, child: Card(child: Padding(padding: const EdgeInsets.fromLTRB(14, 8, 6, 8), child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text(snapshot.pageNumber == null ? timestamp : 'Page ${snapshot.pageNumber} · $timestamp', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 5),
+                  Text('D ${snapshot.debit.toStringAsFixed(2)}  ·  C ${snapshot.credit.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12)),
+                  Text('Balance ${snapshot.finalBalance.toStringAsFixed(2)}', style: const TextStyle(color: BrandColors.muted, fontSize: 12)),
+                ])),
+                PopupMenuButton<String>(
+                  onSelected: (action) => action == 'page' ? _editSnapshotPage(snapshot) : _deleteSnapshot(snapshot),
+                  itemBuilder: (_) => const [PopupMenuItem(value: 'page', child: Text('Edit page number')), PopupMenuItem(value: 'delete', child: Text('Delete snapshot'))],
+                ),
+              ]))));
+            },
+          )),
         const SizedBox(height: 8),
-        const Text('Ordered by when an entry was created, not by its selected ledger date.', style: TextStyle(color: BrandColors.muted)),
-        const SizedBox(height: 16),
-        Expanded(child: visible.isEmpty
-          ? const Center(child: Text('No visible entries in this year yet.'))
+        Text('Entries · ${logs.where((entry) => entry.dailyLogVisible).length} visible', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 5),
+        Expanded(child: logs.isEmpty
+          ? const Center(child: Text('No entries in this year yet.'))
           : ListView.separated(
-              itemCount: visible.length,
+              itemCount: logs.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
-                final entry = visible[index];
-                final customer = _customers.where((item) => item.id == entry.customerId).first;
+                final entry = logs[index];
+                final customer = byId[entry.customerId]!;
                 final logDebit = customer.isStockLedger ? entry.credit : entry.debit;
                 final logCredit = customer.isStockLedger ? entry.debit : entry.credit;
+                final created = entry.createdAt.toLocal();
+                final date = '${created.day.toString().padLeft(2, '0')}/${created.month.toString().padLeft(2, '0')}/${created.year} ${created.hour.toString().padLeft(2, '0')}:${created.minute.toString().padLeft(2, '0')}';
                 return Card(child: ListTile(
                   onTap: () => _openLedger(customer),
+                  leading: Icon(entry.dailyLogVisible ? Icons.receipt_long_outlined : Icons.visibility_off_outlined, color: entry.dailyLogVisible ? BrandColors.teal : BrandColors.muted),
                   title: Text(customer.name),
-                  subtitle: Text('${entry.entryDate.year}-${entry.entryDate.month.toString().padLeft(2, '0')}-${entry.entryDate.day.toString().padLeft(2, '0')}  ·  ${entry.description.isEmpty ? 'No description' : entry.description}'),
-                  trailing: Text('D ${logDebit.toStringAsFixed(2)}\nC ${logCredit.toStringAsFixed(2)}', textAlign: TextAlign.right),
+                  subtitle: Text('$date · ${entry.description.isEmpty ? 'No description' : entry.description}${entry.pageNumber == null ? '' : ' · Page ${entry.pageNumber}'}'),
+                  trailing: SizedBox(width: 145, child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                    Flexible(child: Text('D ${logDebit.toStringAsFixed(2)}\nC ${logCredit.toStringAsFixed(2)}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12))),
+                    Switch.adaptive(value: entry.dailyLogVisible, onChanged: (value) async {
+                      try {
+                        await _repository.setEntryDailyLogVisibility(entry.id, value);
+                        if (_snapshots.isNotEmpty) await _repository.recalculateSnapshots(_activeYear);
+                        await _loadCustomers();
+                      } catch (error) { _showMessage('$error'); }
+                    }),
+                    if (!entry.dailyLogVisible && _snapshots.isNotEmpty)
+                      PopupMenuButton<String>(
+                        tooltip: 'Restore entry',
+                        onSelected: (_) => _restoreLogEntry(entry),
+                        itemBuilder: (_) => const [PopupMenuItem(value: 'restore', child: Text('Restore to latest snapshot'))],
+                      ),
+                  ])),
                 ));
               },
             )),
@@ -473,21 +606,303 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _settingsView(BuildContext context) => ListView(
+  Future<void> _editDailyOpening() async {
+    final debitController = TextEditingController(text: _dailyOpeningDebit.toStringAsFixed(2));
+    final creditController = TextEditingController(text: _dailyOpeningCredit.toStringAsFixed(2));
+    final values = await showDialog<(double, double)>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Daily log opening balance'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: debitController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Opening debit')),
+        const SizedBox(height: 10),
+        TextField(controller: creditController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Opening credit')),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')), FilledButton(onPressed: () {
+        final debit = double.tryParse(debitController.text.trim());
+        final credit = double.tryParse(creditController.text.trim());
+        if (debit == null || credit == null || debit < 0 || credit < 0 || !debit.isFinite || !credit.isFinite) return;
+        Navigator.pop(dialogContext, (debit, credit));
+      }, child: const Text('Save'))],
+    ));
+    debitController.dispose();
+    creditController.dispose();
+    if (values == null) return;
+    try { await _repository.saveDailyLogOpening(debit: values.$1, credit: values.$2); await _loadCustomers(); }
+    catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _saveDailySnapshot() async {
+    final page = await _askText('Save daily closing', 'Page number (optional)');
+    if (page == null) return;
+    try {
+      final snapshot = await _repository.saveSnapshot(year: _activeYear, pageNumber: page.isEmpty ? null : page);
+      await _loadCustomers();
+      _showMessage('Closing snapshot saved${snapshot.pageNumber == null ? '' : ' on page ${snapshot.pageNumber}'}.');
+    } catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _editSnapshotPage(DailyLogSnapshot snapshot) async {
+    final page = await _askText('Edit snapshot page', 'Page number', initial: snapshot.pageNumber ?? '');
+    if (page == null) return;
+    try { await _repository.updateSnapshotPage(snapshot.id, page); await _loadCustomers(); }
+    catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _deleteSnapshot(DailyLogSnapshot snapshot) async {
+    final confirm = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete snapshot?'),
+      content: const Text('Entries are kept. Later snapshots may need recalculating.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete'))],
+    ));
+    if (confirm != true) return;
+    try { await _repository.deleteSnapshot(snapshot.id); await _loadCustomers(); }
+    catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _restoreLogEntry(LedgerEntry entry) async {
+    if (_snapshots.isEmpty) return;
+    final latest = _snapshots.last;
+    final confirm = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Restore entry?'),
+      content: Text('Make this entry visible again and place it at the saved closing time${latest.pageNumber == null ? '' : ' on page ${latest.pageNumber}'}. Later snapshots can be recalculated.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Restore'))],
+    ));
+    if (confirm != true) return;
+    try {
+      await _repository.restoreEntryToSnapshot(entry.id, latest.id);
+      await _repository.recalculateSnapshots(_activeYear);
+      await _loadCustomers();
+      _showMessage('Entry restored.');
+    } catch (error) { _showMessage('$error'); }
+  }
+
+  Widget _settingsView(BuildContext context) => SingleChildScrollView(
         key: const ValueKey('settings'),
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text('Workspace settings', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 18),
-          const Card(child: ListTile(leading: Icon(Icons.lock_outline, color: BrandColors.teal), title: Text('Encrypted local storage'), subtitle: Text('AES-256-GCM · device-held key'))),
-          const SizedBox(height: 10),
-          Card(child: ListTile(leading: const Icon(Icons.calendar_month_outlined), title: const Text('Active ledger year'), subtitle: Text('$_activeYear'))),
-          const SizedBox(height: 10),
-          Card(child: ListTile(leading: const Icon(Icons.devices_outlined), title: const Text('Linked devices'), subtitle: const Text('Pairing requires server credentials and explicit approval.'), onTap: () => _showMessage('Device sync is not enabled until backend security is configured.'))),
-          const SizedBox(height: 10),
-          Card(child: ListTile(leading: const Icon(Icons.file_open_outlined), title: const Text('Restore JSON backup'), subtitle: const Text('Replaces the active workspace after confirmation.'), onTap: _restoreBackup)),
-        ],
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+        child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1040), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Settings', style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 4),
+          const Text('Manage your workspaces, years and company details.', style: TextStyle(color: BrandColors.muted)),
+          const SizedBox(height: 20),
+          LayoutBuilder(builder: (context, constraints) {
+            final sideBySide = constraints.maxWidth >= 760;
+            final workspaceCard = _workspaceSettingsCard(context);
+            final yearCard = _yearSettingsCard(context);
+            return sideBySide
+              ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: workspaceCard), const SizedBox(width: 14), Expanded(child: yearCard)])
+              : Column(children: [workspaceCard, const SizedBox(height: 12), yearCard]);
+          }),
+          const SizedBox(height: 14),
+          _companySettingsCard(context),
+          const SizedBox(height: 14),
+          _notesSettingsCard(context),
+          const SizedBox(height: 14),
+          Card(child: Column(children: [
+            const ListTile(
+              leading: CircleAvatar(backgroundColor: BrandColors.mint, child: Icon(Icons.lock_outline_rounded, color: BrandColors.teal)),
+              title: Text('Private on this device'),
+              subtitle: Text('Ledger data is encrypted locally with AES-GCM; the key stays in platform secure storage.'),
+            ),
+            const Divider(height: 1, indent: 70),
+            ListTile(
+              leading: const CircleAvatar(backgroundColor: BrandColors.elevated, child: Icon(Icons.devices_outlined, color: BrandColors.muted)),
+              title: const Text('Linked devices'),
+              subtitle: const Text('Offline-first by default. Optional encrypted device sync requires secure pairing setup.'),
+              onTap: () => _showMessage('Ledger data remains on this device. No server copy is created until you opt in to secure pairing.'),
+            ),
+          ])),
+          const SizedBox(height: 14),
+          Card(child: Column(children: [
+            ListTile(leading: const Icon(Icons.download_outlined, color: BrandColors.teal), title: const Text('Create backup'), subtitle: const Text('Full workspace JSON; sensitive financial information is not file-encrypted.'), onTap: _createBackup),
+            const Divider(height: 1, indent: 55),
+            ListTile(leading: const Icon(Icons.table_view_outlined, color: BrandColors.teal), title: const Text('Export active year to CSV'), subtitle: Text('Spreadsheet-ready rows for $_activeYear; includes opening balances.'), onTap: _createCsvExport),
+            const Divider(height: 1, indent: 55),
+            ListTile(leading: const Icon(Icons.restore_rounded, color: BrandColors.teal), title: const Text('Restore backup'), subtitle: const Text('Replaces the active workspace after confirmation.'), onTap: _restoreBackup),
+          ])),
+        ]))),
       );
+
+  Widget _workspaceSettingsCard(BuildContext context) => Card(child: Padding(
+        padding: const EdgeInsets.all(17),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Workspace', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          const Text('Separate books and settings for each business.', style: TextStyle(fontSize: 12, color: BrandColors.muted)),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<String>(
+            initialValue: _workspaces.any((item) => '${item['id']}' == _activeWorkspaceId) ? _activeWorkspaceId : null,
+            decoration: const InputDecoration(labelText: 'Active workspace'),
+            items: _workspaces.map((item) => DropdownMenuItem(value: '${item['id']}', child: Text('${item['name']}'))).toList(),
+            onChanged: (value) async {
+              if (value == null) return;
+              try { await _repository.switchWorkspace(value); await _loadCustomers(); } catch (error) { _showMessage('$error'); }
+            },
+          ),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            OutlinedButton.icon(onPressed: _createWorkspace, icon: const Icon(Icons.add), label: const Text('Add')),
+            OutlinedButton.icon(onPressed: _renameWorkspace, icon: const Icon(Icons.edit_outlined), label: const Text('Rename')),
+            TextButton.icon(onPressed: _deleteWorkspace, icon: const Icon(Icons.delete_outline, color: BrandColors.coral), label: const Text('Delete')),
+          ]),
+        ]),
+      ));
+
+  Widget _yearSettingsCard(BuildContext context) => Card(child: Padding(
+        padding: const EdgeInsets.all(17),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Ledger years', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          const Text('New year carries forward customer balances, not entries.', style: TextStyle(fontSize: 12, color: BrandColors.muted)),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<int>(
+            initialValue: _years.contains(_activeYear) ? _activeYear : (_years.isEmpty ? null : _years.first),
+            decoration: const InputDecoration(labelText: 'Active year'),
+            items: _years.map((year) => DropdownMenuItem(value: year, child: Text('$year'))).toList(),
+            onChanged: (year) async {
+              if (year == null) return;
+              try { await _repository.selectYear(year); await _loadCustomers(); } catch (error) { _showMessage('$error'); }
+            },
+          ),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, children: [
+            OutlinedButton.icon(onPressed: _createYear, icon: const Icon(Icons.add), label: const Text('New year')),
+            TextButton.icon(onPressed: _deleteYear, icon: const Icon(Icons.delete_outline, color: BrandColors.coral), label: const Text('Delete year')),
+          ]),
+        ]),
+      ));
+
+  Widget _companySettingsCard(BuildContext context) => Card(child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Company profile', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 13),
+          Row(children: [
+            if (_companyLogoData == null)
+              Container(width: 54, height: 54, decoration: BoxDecoration(color: BrandColors.mint, borderRadius: BorderRadius.circular(13)), child: const Icon(Icons.storefront_outlined, color: BrandColors.teal))
+            else
+              ClipRRect(borderRadius: BorderRadius.circular(13), child: Image.memory(base64Decode(_companyLogoData!.split(',').last), width: 54, height: 54, fit: BoxFit.cover)),
+            const SizedBox(width: 12),
+            Expanded(child: TextField(controller: _companyNameController, decoration: const InputDecoration(labelText: 'Company name'))),
+          ]),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, children: [
+            OutlinedButton.icon(onPressed: _chooseCompanyLogo, icon: const Icon(Icons.image_outlined), label: const Text('Choose logo')),
+            if (_companyLogoData != null) TextButton(onPressed: () => setState(() => _companyLogoData = null), child: const Text('Remove logo')),
+            FilledButton.icon(onPressed: _saveCompanyProfile, icon: const Icon(Icons.save_outlined), label: const Text('Save profile')),
+          ]),
+        ]),
+      ));
+
+  Widget _notesSettingsCard(BuildContext context) => Card(child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Workspace notes', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 11),
+          TextField(controller: _notesController, minLines: 3, maxLines: 7, decoration: const InputDecoration(hintText: 'Add private reminders for this workspace…')),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, children: [
+            FilledButton.icon(onPressed: _saveNotes, icon: const Icon(Icons.save_outlined), label: const Text('Save notes')),
+            TextButton.icon(onPressed: _clearNotes, icon: const Icon(Icons.delete_outline), label: const Text('Clear')),
+          ]),
+        ]),
+      ));
+
+  Future<String?> _askText(String title, String label, {String initial = ''}) async {
+    final controller = TextEditingController(text: initial);
+    final result = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: TextField(controller: controller, autofocus: true, decoration: InputDecoration(labelText: label)),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, controller.text.trim()), child: const Text('Save'))],
+    ));
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _createWorkspace() async {
+    final name = await _askText('Add workspace', 'Workspace name');
+    if (name == null || name.isEmpty) return;
+    try { await _repository.createWorkspace(name); await _loadCustomers(); _showMessage('Workspace created.'); } catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _renameWorkspace() async {
+    final name = await _askText('Rename workspace', 'Workspace name', initial: _workspaceName);
+    if (name == null || name.isEmpty) return;
+    try { await _repository.renameWorkspace(_activeWorkspaceId, name); await _loadCustomers(); _showMessage('Workspace renamed.'); } catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _deleteWorkspace() async {
+    if (_workspaces.length <= 1) { _showMessage('The only workspace cannot be deleted.'); return; }
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete workspace?'),
+      content: Text('Permanently delete “$_workspaceName” and all its years, customers, entries and settings?'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete'))],
+    ));
+    if (confirmed != true) return;
+    try { await _repository.deleteWorkspace(_activeWorkspaceId); await _loadCustomers(); _showMessage('Workspace deleted.'); } catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _createYear() async {
+    final controller = TextEditingController(text: '${_activeYear + 1}');
+    final result = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Create ledger year'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: controller, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Year (1900–9999)')),
+        const SizedBox(height: 8),
+        const Text('Customers and closing balances carry forward. Old entries stay in the previous year.', style: TextStyle(color: BrandColors.muted)),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, controller.text.trim()), child: const Text('Create'))],
+    ));
+    controller.dispose();
+    if (result == null) return;
+    final year = int.tryParse(result);
+    if (year == null) { _showMessage('Enter a valid year.'); return; }
+    try { await _repository.createYear(year); await _loadCustomers(); _showMessage('Year $year created; opening balances carried forward.'); } catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _deleteYear() async {
+    if (_years.length <= 1) { _showMessage('The last ledger year cannot be deleted.'); return; }
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: Text('Delete $_activeYear?'),
+      content: const Text('This permanently deletes customers, entries and snapshots in this year. This cannot be undone.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete year'))],
+    ));
+    if (confirmed != true) return;
+    try { await _repository.deleteYear(_activeYear); await _loadCustomers(); _showMessage('Year deleted.'); } catch (error) { _showMessage('$error'); }
+  }
+
+  Future<void> _chooseCompanyLogo() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: const ['png', 'jpg', 'jpeg'], withData: true);
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      final bytes = file.bytes;
+      if (bytes == null || bytes.isEmpty) throw const FormatException('Image file is empty or unreadable.');
+      if (bytes.length > 4 * 1024 * 1024) throw const FormatException('Logo must be smaller than 4 MB.');
+      final mime = file.extension?.toLowerCase() == 'png' ? 'image/png' : 'image/jpeg';
+      setState(() => _companyLogoData = 'data:$mime;base64,${base64Encode(bytes)}');
+    } catch (error) { _showMessage('Could not load logo: $error'); }
+  }
+
+  Future<void> _saveCompanyProfile() async {
+    try {
+      await _repository.saveCompanyProfile(name: _companyNameController.text, logoData: _companyLogoData);
+      _showMessage('Company profile saved.');
+    } catch (error) { _showMessage('Save failed: $error'); }
+  }
+
+  Future<void> _saveNotes() async {
+    try { await _repository.saveNotes(_notesController.text); _showMessage('Notes saved.'); } catch (error) { _showMessage('Save failed: $error'); }
+  }
+
+  Future<void> _clearNotes() async {
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Clear notes?'),
+      content: const Text('Remove all saved notes from this workspace?'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Clear'))],
+    ));
+    if (confirmed != true) return;
+    _notesController.clear();
+    await _saveNotes();
+  }
 
   Future<void> _openLedger(LedgerCustomer customer) async {
     var entries = _entries.where((entry) => entry.customerId == customer.id).toList();
@@ -516,6 +931,7 @@ class _DashboardPageState extends State<DashboardPage> {
             Text(customer.name),
             Text('${customer.isStockLedger ? 'Stock' : 'General'} ledger · ${filtered.length} entries', style: Theme.of(context).textTheme.labelMedium),
           ])),
+          IconButton(onPressed: () { Navigator.pop(dialogContext); _editOpeningBalance(customer); }, icon: const Icon(Icons.account_balance_wallet_outlined), tooltip: 'Opening balance'),
           IconButton(onPressed: () { Navigator.pop(dialogContext); _addEntry(initialCustomer: customer); }, icon: const Icon(Icons.add_circle_outline), tooltip: 'New entry'),
         ]),
         content: SizedBox(
@@ -595,6 +1011,74 @@ class _DashboardPageState extends State<DashboardPage> {
         actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close'))],
       );
     }));
+  }
+
+  Future<void> _editOpeningBalance(LedgerCustomer customer) async {
+    final debit = TextEditingController(text: customer.openingDebit == 0 ? '' : customer.openingDebit.toString());
+    final credit = TextEditingController(text: customer.openingCredit == 0 ? '' : customer.openingCredit.toString());
+    final buy = TextEditingController(text: customer.openingBuyQuantity == 0 ? '' : (customer.useWeight ? LedgerCalculator.formatWeightKg(customer.openingBuyQuantity) : customer.openingBuyQuantity.toString()));
+    final sell = TextEditingController(text: customer.openingSellQuantity == 0 ? '' : (customer.useWeight ? LedgerCalculator.formatWeightKg(customer.openingSellQuantity) : customer.openingSellQuantity.toString()));
+    await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
+      title: Text('Opening balance · ${customer.name}'),
+      content: SizedBox(width: 460, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: debit, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: customer.isStockLedger ? 'Opening buy amount / Debit' : 'Opening debit')),
+        const SizedBox(height: 10),
+        TextField(controller: credit, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: customer.isStockLedger ? 'Opening sell amount / Credit' : 'Opening credit')),
+        if (customer.isStockLedger) ...[
+          const SizedBox(height: 10),
+          TextField(controller: buy, keyboardType: customer.useWeight ? TextInputType.text : const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: customer.useWeight ? 'Opening buy weight' : 'Opening buy quantity')),
+          const SizedBox(height: 10),
+          TextField(controller: sell, keyboardType: customer.useWeight ? TextInputType.text : const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: customer.useWeight ? 'Opening sell weight' : 'Opening sell quantity')),
+        ],
+      ]))),
+      actions: [
+        TextButton(onPressed: () {
+          debit.text = customer.openingDebit == 0 ? '' : customer.openingDebit.toString();
+          credit.text = customer.openingCredit == 0 ? '' : customer.openingCredit.toString();
+          buy.text = customer.openingBuyQuantity == 0 ? '' : (customer.useWeight ? LedgerCalculator.formatWeightKg(customer.openingBuyQuantity) : customer.openingBuyQuantity.toString());
+          sell.text = customer.openingSellQuantity == 0 ? '' : (customer.useWeight ? LedgerCalculator.formatWeightKg(customer.openingSellQuantity) : customer.openingSellQuantity.toString());
+        }, child: const Text('Reset')),
+        TextButton(onPressed: () async {
+          final clear = await showDialog<bool>(context: dialogContext, builder: (confirmContext) => AlertDialog(
+            title: const Text('Clear opening balance?'),
+            content: const Text('All saved opening amounts and quantities for this customer will be cleared.'),
+            actions: [TextButton(onPressed: () => Navigator.pop(confirmContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(confirmContext, true), child: const Text('Clear'))],
+          ));
+          if (clear == true) {
+            await _saveOpeningBalance(customer, debit: 0, credit: 0, buy: 0, sell: 0);
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+          }
+        }, child: const Text('Clear')),
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+        FilledButton(onPressed: () async {
+          final d = _parseNumber(debit.text);
+          final c = _parseNumber(credit.text);
+          final b = _parseQuantity(buy.text, customer.useWeight);
+          final s = _parseQuantity(sell.text, customer.useWeight);
+          if (![d, c, b, s].every((value) => value.isFinite && value >= 0)) { _showMessage('Opening values must be valid and non-negative.'); return; }
+          await _saveOpeningBalance(customer, debit: d, credit: c, buy: b, sell: s);
+          if (dialogContext.mounted) Navigator.pop(dialogContext);
+        }, child: const Text('Save')),
+      ],
+    ));
+    debit.dispose();
+    credit.dispose();
+    buy.dispose();
+    sell.dispose();
+  }
+
+  Future<void> _saveOpeningBalance(LedgerCustomer customer, {required double debit, required double credit, required double buy, required double sell}) async {
+    try {
+      await _repository.updateCustomer(LedgerCustomer(
+        id: customer.id, name: customer.name, year: customer.year, phone: customer.phone, address: customer.address,
+        isStockLedger: customer.isStockLedger, useWeight: customer.useWeight,
+        openingDebit: debit, openingCredit: credit, openingBuyQuantity: buy, openingSellQuantity: sell,
+      ));
+      await _loadCustomers();
+      _showMessage('Opening balance saved.');
+    } catch (error) {
+      _showMessage('Could not save opening balance: $error');
+    }
   }
 
   List<LedgerEntry> _filterLedgerEntries(List<LedgerEntry> entries, String filter, DateTime? start, DateTime? end) {
@@ -975,6 +1459,28 @@ class _DashboardPageState extends State<DashboardPage> {
     sellQuantity.dispose();
     page.dispose();
     description.dispose();
+  }
+
+  Future<void> _createCsvExport() async {
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Export ledger rows?'),
+      content: const Text('The CSV contains customer details and financial data for the active year. Save and share it carefully.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Export CSV'))],
+    ));
+    if (confirmed != true) return;
+    try {
+      final csv = await _repository.exportCsv(year: _activeYear);
+      final saved = await FilePicker.platform.saveFile(
+        dialogTitle: 'Export HisabFlow ledger CSV',
+        fileName: 'hisabflow-$_activeYear.csv',
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+        bytes: Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode(csv)]),
+      );
+      if (saved != null) _showMessage('CSV export saved for $_activeYear.');
+    } catch (error) {
+      _showMessage('CSV export failed: $error');
+    }
   }
 
   Future<void> _createBackup() async {

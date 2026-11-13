@@ -14,7 +14,7 @@ flutter test
 flutter run -d chrome
 ```
 
-The workspace currently includes the responsive overview, customer list/create flow, basic ledger-entry creation, customer ledger totals, daily-log listing, JSON backup/restore flow and the encrypted local persistence foundation. Broader requirements (year rollover, snapshot editing/recalculation, full export/print, biometric/PIN, workspace switching and production-grade linked-device sync) still need implementation and platform testing; the Supabase schema is a security starter, not a production sync service.
+The app now includes a responsive overview, customer and ledger-entry management, ledger filters and balances, opening balances, stock/weight ledgers, independent local workspaces, year carry-forward, daily-log snapshots, workspace notes and company profile, encrypted local storage, JSON backup/restore and active-year CSV export. See the release checklist for platform-specific work still in progress. Flutter analysis, tests and target-platform builds must pass before release.
 
 ## Structure
 
@@ -32,4 +32,4 @@ The importer recognizes the Drive file's `balancedesk-manual-backup` version 2 e
 
 ## Linked devices
 
-Linked devices require an authenticated relay and strict workspace membership checks. A cloud relay must not become the source of truth: each installation remains usable offline, and changes synchronize only after explicit device linking. See `docs/linked_devices.md`. Cloud keys and credentials must be supplied outside source control.
+The app currently stays local and does not sync ledger data. The safest future direction is optional, end-to-end encrypted pairing while preserving offline use; do not enable cloud sync until pairing, revocation, conflict handling and membership policies are production-ready. See `docs/linked_devices.md` and `docs/release-checklist.md`.

@@ -3,14 +3,16 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/security/encrypted_vault.dart';
+import '../../../core/security/vault_store.dart';
 import '../domain/customer.dart';
 import '../domain/ledger_entry.dart';
 import '../domain/ledger_calculator.dart';
+import '../domain/daily_log_snapshot.dart';
 import 'ledger_backup_importer.dart';
 
 class LocalLedgerRepository {
-  LocalLedgerRepository({EncryptedVault? vault}) : _vault = vault ?? EncryptedVault();
-  final EncryptedVault _vault;
+  LocalLedgerRepository({VaultStore? vault}) : _vault = vault ?? EncryptedVault();
+  final VaultStore _vault;
   static const _uuid = Uuid();
   static const _workspaceId = 'default-workspace';
 
@@ -41,7 +43,230 @@ class LocalLedgerRepository {
     return empty;
   }
 
+  Future<Map<String, dynamic>> currentWorkspace() async => _activeWorkspace(await load());
+
+  Future<({Map<String, dynamic> active, List<Map<String, dynamic>> all})> workspaceState() async {
+    final data = await load();
+    final all = (data['workspaces'] as List? ?? const []).whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+    return (active: _activeWorkspace(data), all: all);
+  }
+
   Future<int> activeYear() async => int.tryParse('${_activeWorkspace(await load())['activeYear']}') ?? DateTime.now().year;
+
+  Future<List<int>> years() async {
+    final values = (_activeWorkspace(await load())['years'] as List? ?? const []).map((value) => int.tryParse('$value')).whereType<int>().toSet().toList()..sort();
+    return values;
+  }
+
+  Future<void> selectYear(int year) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final values = (workspace['years'] as List? ?? const []).map((value) => int.tryParse('$value')).whereType<int>().toSet();
+    if (!values.contains(year)) throw StateError('Ledger year does not exist.');
+    workspace['activeYear'] = year;
+    await _vault.write(data);
+  }
+
+  Future<void> createYear(int year) async {
+    if (year < 1900 || year > 9999) throw ArgumentError('Year must be from 1900 to 9999.');
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final years = (workspace['years'] as List? ?? const []).map((value) => int.tryParse('$value')).whereType<int>().toSet();
+    if (years.contains(year)) throw StateError('This ledger year already exists.');
+    final sourceYear = int.tryParse('${workspace['activeYear']}') ?? DateTime.now().year;
+    final oldCustomers = (workspace['customers'] as List? ?? <Object?>[]).whereType<Map>().map((row) => LedgerCustomer.fromJson(Map<String, dynamic>.from(row))).where((customer) => customer.year == sourceYear).toList();
+    final oldEntries = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().map((row) => LedgerEntry.fromJson(Map<String, dynamic>.from(row))).toList();
+    final customers = (workspace['customers'] as List? ?? <Object?>[]).toList();
+    for (final customer in oldCustomers) {
+      final entries = oldEntries.where((entry) => entry.customerId == customer.id).toList();
+      final totals = LedgerCalculator.totals(customer, entries);
+      final closing = totals.balance;
+      final quantity = totals.remainingQuantity;
+      customers.add(LedgerCustomer(
+        id: _uuid.v4(), name: customer.name, year: year, phone: customer.phone, address: customer.address,
+        isStockLedger: customer.isStockLedger, useWeight: customer.useWeight,
+        openingDebit: closing > 0 ? closing : 0,
+        openingCredit: closing < 0 ? -closing : 0,
+        openingBuyQuantity: quantity > 0 ? quantity : 0,
+        openingSellQuantity: quantity < 0 ? -quantity : 0,
+      ).toJson());
+    }
+    workspace['customers'] = customers;
+    years.add(year);
+    workspace['years'] = years.toList()..sort();
+    workspace['activeYear'] = year;
+    final snapshots = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final priorSnapshots = snapshots.where((row) => int.tryParse('${row['year'] ?? sourceYear}') == sourceYear).toList()..sort((a, b) => '${a['createdAt'] ?? a['savedAt']}'.compareTo('${b['createdAt'] ?? b['savedAt']}'));
+    var dailyClosing = 0.0;
+    if (priorSnapshots.isNotEmpty) {
+      final latest = priorSnapshots.last;
+      dailyClosing = double.tryParse('${latest['finalBalance'] ?? latest['balance'] ?? 0}') ?? 0;
+    } else {
+      dailyClosing = _dailyClosing(workspace, oldCustomers, oldEntries);
+    }
+    workspace['dailyLogOpeningDebit'] = dailyClosing > 0 ? dailyClosing : 0;
+    workspace['dailyLogOpeningCredit'] = dailyClosing < 0 ? -dailyClosing : 0;
+    await _vault.write(data);
+  }
+
+  double _dailyClosing(Map<String, dynamic> workspace, List<LedgerCustomer> customers, List<LedgerEntry> entries) {
+    var debit = double.tryParse('${workspace['dailyLogOpeningDebit'] ?? 0}') ?? 0;
+    var credit = double.tryParse('${workspace['dailyLogOpeningCredit'] ?? 0}') ?? 0;
+    final customerById = {for (final customer in customers) customer.id: customer};
+    for (final entry in entries) {
+      if (!entry.dailyLogVisible) continue;
+      final customer = customerById[entry.customerId];
+      if (customer == null) continue;
+      if (customer.isStockLedger) {
+        debit += entry.credit;
+        credit += entry.debit;
+      } else {
+        debit += entry.debit;
+        credit += entry.credit;
+      }
+    }
+    return debit - credit;
+  }
+
+  Future<void> deleteYear(int year) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final years = (workspace['years'] as List? ?? const []).map((value) => int.tryParse('$value')).whereType<int>().toSet();
+    if (years.length <= 1) throw StateError('The last ledger year cannot be deleted.');
+    if (!years.remove(year)) throw StateError('Ledger year does not exist.');
+    final customers = (workspace['customers'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final ids = customers.where((row) => int.tryParse('${row['year'] ?? row['ledgerYear']}') == year).map((row) => '${row['id']}').toSet();
+    workspace['customers'] = customers.where((row) => !ids.contains('${row['id']}')).toList();
+    final entries = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    workspace['entries'] = entries.where((row) => !ids.contains('${row['customerId'] ?? row['customer_id']}')).toList();
+    final snapshots = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    workspace['snapshots'] = snapshots.where((row) => int.tryParse('${row['year'] ?? 0}') != year).toList();
+    workspace['years'] = years.toList()..sort();
+    if (int.tryParse('${workspace['activeYear']}') == year) workspace['activeYear'] = years.reduce((a, b) => a > b ? a : b);
+    await _vault.write(data);
+  }
+
+  Future<void> saveNotes(String notes) async {
+    final data = await load();
+    _activeWorkspace(data)['notes'] = notes;
+    await _vault.write(data);
+  }
+
+  Future<void> saveCompanyProfile({required String name, String? logoData}) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    workspace['companyName'] = name.trim();
+    workspace['companyLogo'] = logoData;
+    await _vault.write(data);
+  }
+
+  Future<List<Map<String, dynamic>>> workspaces() async {
+    final data = await load();
+    return (data['workspaces'] as List? ?? const []).whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+  }
+
+  Future<void> createWorkspace(String name) async {
+    final normalized = name.trim();
+    if (normalized.isEmpty) throw ArgumentError('Workspace name is required.');
+    final data = await load();
+    final existing = (data['workspaces'] as List? ?? const []).whereType<Map>().toList();
+    final year = DateTime.now().year;
+    final id = _uuid.v4();
+    existing.add(_emptyWorkspace(id, normalized, year));
+    data['workspaces'] = existing;
+    data['activeWorkspaceId'] = id;
+    await _vault.write(data);
+  }
+
+  Future<void> renameWorkspace(String workspaceId, String name) async {
+    final normalized = name.trim();
+    if (normalized.isEmpty) throw ArgumentError('Workspace name is required.');
+    final data = await load();
+    final rows = (data['workspaces'] as List? ?? const []).whereType<Map>().toList();
+    final workspace = rows.firstWhere((row) => '${row['id']}' == workspaceId, orElse: () => throw StateError('Workspace not found.'));
+    workspace['name'] = normalized;
+    data['workspaces'] = rows;
+    await _vault.write(data);
+  }
+
+  Future<void> switchWorkspace(String workspaceId) async {
+    final data = await load();
+    final rows = (data['workspaces'] as List? ?? const []).whereType<Map>().toList();
+    if (!rows.any((row) => '${row['id']}' == workspaceId)) throw StateError('Workspace not found.');
+    data['activeWorkspaceId'] = workspaceId;
+    await _vault.write(data);
+  }
+
+  Future<void> deleteWorkspace(String workspaceId) async {
+    final data = await load();
+    final rows = (data['workspaces'] as List? ?? const []).whereType<Map>().toList();
+    if (rows.length <= 1) throw StateError('The last workspace cannot be deleted.');
+    final remaining = rows.where((row) => '${row['id']}' != workspaceId).toList();
+    if (remaining.length == rows.length) throw StateError('Workspace not found.');
+    data['workspaces'] = remaining;
+    if ('${data['activeWorkspaceId']}' == workspaceId) data['activeWorkspaceId'] = remaining.first['id'];
+    await _vault.write(data);
+  }
+
+  Map<String, Object?> _emptyWorkspace(String id, String name, int year) => {
+        'id': id,
+        'name': name,
+        'activeYear': year,
+        'years': [year],
+        'customers': <Object?>[],
+        'entries': <Object?>[],
+        'snapshots': <Object?>[],
+        'dailyLogOpeningDebit': 0,
+        'dailyLogOpeningCredit': 0,
+        'notes': '',
+        'companyName': '',
+        'companyLogo': null,
+      };
+
+  Future<String> exportCsv({int? year}) async {
+    final workspace = _activeWorkspace(await load());
+    final selectedYear = year ?? int.tryParse('${workspace['activeYear']}') ?? DateTime.now().year;
+    final customers = (workspace['customers'] as List? ?? const []).whereType<Map>()
+        .map((row) => LedgerCustomer.fromJson(Map<String, dynamic>.from(row)))
+        .where((customer) => customer.year == selectedYear)
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final customerById = {for (final customer in customers) customer.id: customer};
+    final entries = (workspace['entries'] as List? ?? const []).whereType<Map>()
+        .map((row) => LedgerEntry.fromJson(Map<String, dynamic>.from(row)))
+        .where((entry) => customerById.containsKey(entry.customerId))
+        .toList()
+      ..sort((a, b) {
+        final byDate = a.entryDate.compareTo(b.entryDate);
+        return byDate != 0 ? byDate : a.createdAt.compareTo(b.createdAt);
+      });
+    final rows = <List<Object?>>[
+      ['record_type', 'year', 'customer_id', 'customer_name', 'phone', 'address', 'entry_id', 'entry_date', 'created_at', 'page', 'description', 'debit', 'credit', 'buy_quantity', 'sell_quantity', 'stock_ledger', 'weight_mode', 'daily_log_visible'],
+    ];
+    for (final customer in customers) {
+      rows.add([
+        'opening', selectedYear, customer.id, customer.name, customer.phone, customer.address,
+        '', '', '', '', 'Opening balance', customer.openingDebit, customer.openingCredit,
+        customer.openingBuyQuantity, customer.openingSellQuantity, customer.isStockLedger, customer.useWeight, '',
+      ]);
+      for (final entry in entries.where((item) => item.customerId == customer.id)) {
+        rows.add([
+          'entry', selectedYear, customer.id, customer.name, customer.phone, customer.address,
+          entry.id, entry.entryDate.toIso8601String(), entry.createdAt.toIso8601String(), entry.pageNumber ?? '', entry.description,
+          entry.debit, entry.credit, entry.buyQuantity, entry.sellQuantity, customer.isStockLedger, customer.useWeight, entry.dailyLogVisible,
+        ]);
+      }
+    }
+    return rows.map((row) => row.map(_csvField).join(',')).join('\r\n');
+  }
+
+  String _csvField(Object? value) {
+    var text = '$value';
+    // Prevent spreadsheet formula execution in untrusted text fields.
+    if (value is String && RegExp(r'^\s*[=+@-]').hasMatch(text)) text = "'$text";
+    if (!text.contains(',') && !text.contains('"') && !text.contains('\n') && !text.contains('\r')) return text;
+    return '"${text.replaceAll('"', '""')}"';
+  }
 
   Future<String> exportBackupJson() async {
     final workspace = _activeWorkspace(await load());
@@ -196,15 +421,197 @@ class LocalLedgerRepository {
     await _vault.write(data);
   }
 
+  Future<double> dailyLogOpeningDebit() async => double.tryParse('${_activeWorkspace(await load())['dailyLogOpeningDebit'] ?? 0}') ?? 0;
+  Future<double> dailyLogOpeningCredit() async => double.tryParse('${_activeWorkspace(await load())['dailyLogOpeningCredit'] ?? 0}') ?? 0;
+
+  Future<void> saveDailyLogOpening({required double debit, required double credit}) async {
+    if (debit < 0 || credit < 0 || !debit.isFinite || !credit.isFinite) throw ArgumentError('Opening amounts must be non-negative numbers.');
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    workspace['dailyLogOpeningDebit'] = debit;
+    workspace['dailyLogOpeningCredit'] = credit;
+    await _vault.write(data);
+  }
+
+  Future<List<DailyLogSnapshot>> dailySnapshots(int year) async {
+    final rows = (_activeWorkspace(await load())['snapshots'] as List? ?? const []).whereType<Map>().toList();
+    final snapshots = rows.map((row) => DailyLogSnapshot.fromJson(Map<String, dynamic>.from(row))).where((snapshot) => snapshot.year == year).toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return snapshots;
+  }
+
+  Future<DailyLogSnapshot> saveSnapshot({required int year, required String? pageNumber, DateTime? savedAt}) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final current = savedAt ?? DateTime.now();
+    final rows = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final snapshots = rows.map((row) => DailyLogSnapshot.fromJson(Map<String, dynamic>.from(row))).where((snapshot) => snapshot.year == year).toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final previous = snapshots.isEmpty ? null : snapshots.last;
+    final alreadySnapshotted = snapshots.expand((snapshot) => snapshot.entryIds).toSet();
+    final customers = (workspace['customers'] as List? ?? <Object?>[]).whereType<Map>().map((row) => LedgerCustomer.fromJson(Map<String, dynamic>.from(row))).where((customer) => customer.year == year).toList();
+    final customerById = {for (final customer in customers) customer.id: customer};
+    final entryRows = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final periodEntries = entryRows.map((row) => LedgerEntry.fromJson(Map<String, dynamic>.from(row))).where((entry) {
+      return entry.dailyLogVisible && customerById.containsKey(entry.customerId) &&
+          !alreadySnapshotted.contains(entry.id) && !entry.createdAt.isAfter(current);
+    }).toList();
+    var debit = previous == null ? (double.tryParse('${workspace['dailyLogOpeningDebit'] ?? 0}') ?? 0) : (previous.finalBalance > 0 ? previous.finalBalance : 0);
+    var credit = previous == null ? (double.tryParse('${workspace['dailyLogOpeningCredit'] ?? 0}') ?? 0) : (previous.finalBalance < 0 ? -previous.finalBalance : 0);
+    final customerIds = <String>{};
+    for (final entry in periodEntries) {
+      final customer = customerById[entry.customerId]!;
+      debit += customer.isStockLedger ? entry.credit : entry.debit;
+      credit += customer.isStockLedger ? entry.debit : entry.credit;
+      customerIds.add(customer.id);
+    }
+    if (periodEntries.isEmpty && debit == 0 && credit == 0) throw StateError('No visible entries or opening balance to snapshot.');
+    final id = _uuid.v4();
+    final cleanPage = (pageNumber ?? '').trim();
+    final snapshot = DailyLogSnapshot(
+      id: id, year: year, createdAt: current, debit: debit, credit: credit, finalBalance: debit - credit,
+      customerCount: customerIds.length, pageNumber: cleanPage.isEmpty ? null : cleanPage,
+      entryIds: periodEntries.map((entry) => entry.id).toList(),
+    );
+    if (cleanPage.isNotEmpty) {
+      final ids = snapshot.entryIds.toSet();
+      for (var i = 0; i < entryRows.length; i++) {
+        final entry = LedgerEntry.fromJson(Map<String, dynamic>.from(entryRows[i]));
+        if (ids.contains(entry.id)) entryRows[i] = entry.copyWith(pageNumber: cleanPage).toJson();
+      }
+      workspace['entries'] = entryRows;
+    }
+    rows.add(snapshot.toJson());
+    workspace['snapshots'] = rows;
+    await _vault.write(data);
+    return snapshot;
+  }
+
+  Future<void> updateSnapshotPage(String snapshotId, String? pageNumber) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final snapshots = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final index = snapshots.indexWhere((row) => '${row['id']}' == snapshotId);
+    if (index < 0) throw StateError('Snapshot not found.');
+    final snapshot = DailyLogSnapshot.fromJson(Map<String, dynamic>.from(snapshots[index]));
+    final page = (pageNumber ?? '').trim();
+    snapshots[index] = DailyLogSnapshot(id: snapshot.id, year: snapshot.year, createdAt: snapshot.createdAt, debit: snapshot.debit, credit: snapshot.credit, finalBalance: snapshot.finalBalance, customerCount: snapshot.customerCount, entryIds: snapshot.entryIds, pageNumber: page.isEmpty ? null : page).toJson();
+    if (page.isNotEmpty) {
+      final ids = snapshot.entryIds.toSet();
+      final entries = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+      for (var i = 0; i < entries.length; i++) {
+        final entry = LedgerEntry.fromJson(Map<String, dynamic>.from(entries[i]));
+        if (ids.contains(entry.id)) entries[i] = entry.copyWith(pageNumber: page).toJson();
+      }
+      workspace['entries'] = entries;
+    }
+    workspace['snapshots'] = snapshots;
+    await _vault.write(data);
+  }
+
+  Future<void> deleteSnapshot(String snapshotId) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final snapshots = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final remaining = snapshots.where((row) => '${row['id']}' != snapshotId).toList();
+    if (remaining.length == snapshots.length) throw StateError('Snapshot not found.');
+    workspace['snapshots'] = remaining;
+    await _vault.write(data);
+  }
+
+  Future<void> clearSnapshots(int year) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final snapshots = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    workspace['snapshots'] = snapshots.where((row) => int.tryParse('${row['year'] ?? 0}') != year).toList();
+    await _vault.write(data);
+  }
+
+  Future<void> setEntryDailyLogVisibility(String entryId, bool visible) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final entries = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final index = entries.indexWhere((row) => '${row['id']}' == entryId);
+    if (index < 0) throw StateError('Entry not found.');
+    entries[index] = LedgerEntry.fromJson(Map<String, dynamic>.from(entries[index])).copyWith(dailyLogVisible: visible).toJson();
+    workspace['entries'] = entries;
+    await _vault.write(data);
+  }
+
+  Future<void> restoreEntryToSnapshot(String entryId, String snapshotId) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final snapshots = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    Map? snapshotRow;
+    for (final row in snapshots) {
+      if ('${row['id']}' == snapshotId) { snapshotRow = row; break; }
+    }
+    if (snapshotRow == null) throw StateError('Snapshot not found.');
+    final snapshot = DailyLogSnapshot.fromJson(Map<String, dynamic>.from(snapshotRow));
+    final rows = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final index = rows.indexWhere((row) => '${row['id']}' == entryId);
+    if (index < 0) throw StateError('Entry not found.');
+    final entry = LedgerEntry.fromJson(Map<String, dynamic>.from(rows[index]));
+    rows[index] = LedgerEntry(id: entry.id, customerId: entry.customerId, entryDate: entry.entryDate, createdAt: snapshot.createdAt, pageNumber: snapshot.pageNumber ?? entry.pageNumber, description: entry.description, debit: entry.debit, credit: entry.credit, buyQuantity: entry.buyQuantity, sellQuantity: entry.sellQuantity, dailyLogVisible: true).toJson();
+    workspace['entries'] = rows;
+    await _vault.write(data);
+  }
+
+  Future<void> recalculateSnapshots(int year) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final snapshots = (workspace['snapshots'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final selected = snapshots.map((row) => DailyLogSnapshot.fromJson(Map<String, dynamic>.from(row))).where((snapshot) => snapshot.year == year).toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final customers = (workspace['customers'] as List? ?? <Object?>[]).whereType<Map>().map((row) => LedgerCustomer.fromJson(Map<String, dynamic>.from(row))).where((customer) => customer.year == year).toList();
+    final customerById = {for (final customer in customers) customer.id: customer};
+    final entries = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().map((row) => LedgerEntry.fromJson(Map<String, dynamic>.from(row))).toList();
+    var openingDebit = double.tryParse('${workspace['dailyLogOpeningDebit'] ?? 0}') ?? 0;
+    var openingCredit = double.tryParse('${workspace['dailyLogOpeningCredit'] ?? 0}') ?? 0;
+    final processedEntryIds = <String>{};
+    final recalculated = <String, DailyLogSnapshot>{};
+    for (final snapshot in selected) {
+      var debit = openingDebit;
+      var credit = openingCredit;
+      final period = entries.where((entry) => entry.dailyLogVisible && customerById.containsKey(entry.customerId) && !processedEntryIds.contains(entry.id) && !entry.createdAt.isAfter(snapshot.createdAt)).toList();
+      final customersInPeriod = <String>{};
+      for (final entry in period) {
+        final customer = customerById[entry.customerId]!;
+        debit += customer.isStockLedger ? entry.credit : entry.debit;
+        credit += customer.isStockLedger ? entry.debit : entry.credit;
+        customersInPeriod.add(customer.id);
+      }
+      final updated = DailyLogSnapshot(id: snapshot.id, year: snapshot.year, createdAt: snapshot.createdAt, debit: debit, credit: credit, finalBalance: debit - credit, customerCount: customersInPeriod.length, pageNumber: snapshot.pageNumber, entryIds: period.map((entry) => entry.id).toList());
+      recalculated[snapshot.id] = updated;
+      processedEntryIds.addAll(updated.entryIds);
+      openingDebit = updated.finalBalance > 0 ? updated.finalBalance : 0;
+      openingCredit = updated.finalBalance < 0 ? -updated.finalBalance : 0;
+    }
+    workspace['snapshots'] = snapshots.map((row) {
+      final snapshot = DailyLogSnapshot.fromJson(Map<String, dynamic>.from(row));
+      return recalculated[snapshot.id]?.toJson() ?? row;
+    }).toList();
+    await _vault.write(data);
+  }
+
   /// Parses everything before the atomic vault replacement; failed restores leave old data intact.
   Future<void> restore(ImportedLedger imported) async {
     final current = await load();
     final workspace = _activeWorkspace(current);
     workspace['activeYear'] = imported.year;
-    workspace['years'] = [imported.year];
+    final restoredSnapshots = imported.source['snapshots'] ?? imported.source['dailyLogSnapshots'] ?? <Object?>[];
+    final restoredYears = <int>{imported.year, ...imported.customers.map((customer) => customer.year)};
+    final sourceYears = imported.source['years'];
+    if (sourceYears is List) {
+      restoredYears.addAll(sourceYears.map((value) => int.tryParse('$value')).whereType<int>());
+    }
+    if (restoredSnapshots is List) {
+      restoredYears.addAll(restoredSnapshots.whereType<Map>().map((row) => int.tryParse('${row['year'] ?? ''}')).whereType<int>());
+    }
+    workspace['years'] = restoredYears.toList()..sort();
     workspace['customers'] = imported.customers.map((customer) => customer.toJson()).toList();
     workspace['entries'] = imported.entries.map((entry) => entry.toJson()).toList();
-    workspace['snapshots'] = imported.source['snapshots'] ?? imported.source['dailyLogSnapshots'] ?? <Object?>[];
+    workspace['snapshots'] = restoredSnapshots;
     workspace['dailyLogOpeningDebit'] = imported.source['dailyLogOpeningDebit'] ?? imported.source['daily_log_opening_debit'] ?? 0;
     workspace['dailyLogOpeningCredit'] = imported.source['dailyLogOpeningCredit'] ?? imported.source['daily_log_opening_credit'] ?? 0;
     workspace['notes'] = imported.source['notes'] ?? workspace['notes'] ?? '';
