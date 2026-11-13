@@ -56,7 +56,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final wide = MediaQuery.sizeOf(context).width >= 740;
     final content = switch (_selected) {
       0 => _overview(context),
       1 => _customersView(context),
@@ -88,85 +88,216 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _rail() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(22),
-          child: NavigationRail(
-            selectedIndex: _selected,
-            onDestinationSelected: (value) => setState(() => _selected = value),
-            leading: const Padding(padding: EdgeInsets.only(top: 12, bottom: 28), child: _BrandMark()),
-            destinations: const [
-              NavigationRailDestination(icon: Icon(Icons.grid_view_rounded), label: Text('Overview')),
-              NavigationRailDestination(icon: Icon(Icons.people_alt_outlined), label: Text('Customers')),
-              NavigationRailDestination(icon: Icon(Icons.summarize_outlined), label: Text('Summary')),
-              NavigationRailDestination(icon: Icon(Icons.receipt_long_outlined), label: Text('Daily log')),
-              NavigationRailDestination(icon: Icon(Icons.tune_rounded), label: Text('Settings')),
-            ],
-          ),
+  Widget _rail() => Container(
+        width: 244,
+        margin: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+        decoration: BoxDecoration(
+          color: BrandColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: BrandColors.border),
         ),
-      );
-
-  Widget _topBar(BuildContext context, bool wide) => Padding(
-        padding: EdgeInsets.fromLTRB(wide ? 28 : 20, 16, wide ? 32 : 20, 14),
-        child: Row(children: [
-          if (!wide) const _BrandMark(),
-          if (!wide) const SizedBox(width: 12),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('HisabFlow', style: Theme.of(context).textTheme.titleLarge),
-            Text('My workspace  •  $_activeYear', style: Theme.of(context).textTheme.labelMedium),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const _BrandMark(),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('HisabFlow', style: Theme.of(context).textTheme.titleLarge),
+              const Text('BOOKKEEPING', style: TextStyle(fontSize: 9, letterSpacing: 1.4, fontWeight: FontWeight.w700, color: BrandColors.muted)),
+            ]),
           ]),
+          const SizedBox(height: 25),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: BrandColors.canvas, borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              const Icon(Icons.workspaces_outline, size: 18, color: BrandColors.teal),
+              const SizedBox(width: 9),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('WORKSPACE', style: TextStyle(fontSize: 9, letterSpacing: 1, color: BrandColors.muted, fontWeight: FontWeight.w700)),
+                Text('My workspace', style: Theme.of(context).textTheme.titleMedium),
+              ])),
+              const Icon(Icons.expand_more, size: 18, color: BrandColors.muted),
+            ]),
+          ),
+          const SizedBox(height: 24),
+          const Padding(padding: EdgeInsets.only(left: 10, bottom: 9), child: Text('MENU', style: TextStyle(fontSize: 10, letterSpacing: 1.2, color: BrandColors.muted, fontWeight: FontWeight.w700))),
+          _railItem(Icons.grid_view_rounded, 'Overview', 0),
+          _railItem(Icons.people_alt_outlined, 'Customers', 1),
+          _railItem(Icons.summarize_outlined, 'Summary', 2),
+          _railItem(Icons.receipt_long_outlined, 'Daily logs', 3),
+          _railItem(Icons.tune_rounded, 'Settings', 4),
           const Spacer(),
-          IconButton.filledTonal(onPressed: _restoreBackup, icon: const Icon(Icons.file_open_outlined), tooltip: 'Restore backup'),
-          const SizedBox(width: 8),
-          IconButton.filledTonal(onPressed: () => _showMessage('Linked-device pairing will be available after secure server setup.'), icon: const Icon(Icons.devices_outlined), tooltip: 'Linked devices'),
-          const SizedBox(width: 8),
-          const CircleAvatar(backgroundColor: BrandColors.elevated, child: Icon(Icons.person_outline_rounded)),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: BrandColors.mint, borderRadius: BorderRadius.circular(12)),
+            child: const Row(children: [
+              Icon(Icons.lock_outline_rounded, size: 17, color: BrandColors.teal),
+              SizedBox(width: 8),
+              Expanded(child: Text('Private on this device', style: TextStyle(fontSize: 11, color: BrandColors.ink, fontWeight: FontWeight.w600))),
+            ]),
+          ),
         ]),
       );
+
+  Widget _railItem(IconData icon, String label, int index) {
+    final selected = _selected == index;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: selected ? BrandColors.mint : Colors.transparent,
+        borderRadius: BorderRadius.circular(11),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(11),
+          onTap: () => setState(() => _selected = index),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
+            child: Row(children: [
+              Icon(icon, size: 19, color: selected ? BrandColors.teal : BrandColors.muted),
+              const SizedBox(width: 11),
+              Text(label, style: TextStyle(color: selected ? BrandColors.ink : BrandColors.muted, fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
+              if (selected) ...[
+                const Spacer(),
+                Container(width: 6, height: 6, decoration: const BoxDecoration(color: BrandColors.teal, shape: BoxShape.circle)),
+              ],
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _topBar(BuildContext context, bool wide) {
+    final isDesktop = MediaQuery.sizeOf(context).width >= 1100;
+    return Padding(
+        padding: EdgeInsets.fromLTRB(wide ? 28 : 18, 16, wide ? 28 : 18, 12),
+        child: Row(children: [
+          if (!wide) const _BrandMark(),
+          if (!wide) const SizedBox(width: 11),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(wide ? const ['Overview', 'Customers', 'Summary', 'Daily logs', 'Settings'][_selected] : 'HisabFlow', style: Theme.of(context).textTheme.titleLarge),
+            Text('My workspace  ·  $_activeYear', style: Theme.of(context).textTheme.labelMedium),
+          ])),
+          if (isDesktop) FilledButton.icon(onPressed: _addEntry, icon: const Icon(Icons.add_rounded), label: const Text('New entry')),
+          const SizedBox(width: 8),
+          IconButton(onPressed: _restoreBackup, icon: const Icon(Icons.file_upload_outlined), tooltip: 'Restore backup'),
+          IconButton(onPressed: () => _showMessage('Linked-device pairing will be available after secure server setup.'), icon: const Icon(Icons.devices_outlined), tooltip: 'Linked devices'),
+          const SizedBox(width: 4),
+          const CircleAvatar(radius: 18, backgroundColor: BrandColors.mint, child: Icon(Icons.person_outline_rounded, color: BrandColors.teal, size: 20)),
+        ]),
+      );
+  }
 
   Widget _overview(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    final isDesktop = MediaQuery.sizeOf(context).width >= 1100;
+    final width = MediaQuery.sizeOf(context).width;
+    final isDesktop = width >= 1100;
+    final activeCustomers = _customers.where((item) => item.year == _activeYear).toList();
+    final activeIds = activeCustomers.map((item) => item.id).toSet();
+    final activeEntries = _entries.where((entry) => activeIds.contains(entry.customerId)).toList();
+    var debit = 0.0;
+    var credit = 0.0;
+    for (final customer in activeCustomers) {
+      final ledgerEntries = activeEntries.where((entry) => entry.customerId == customer.id);
+      final totals = LedgerCalculator.totals(customer, ledgerEntries);
+      debit += totals.debit;
+      credit += totals.credit;
+    }
+    final day = DateTime.now();
+    final dateLabel = '${_weekday(day.weekday)}, ${_month(day.month)} ${day.day}';
+
     return SingleChildScrollView(
       key: const ValueKey('overview'),
-      padding: EdgeInsets.fromLTRB(isDesktop ? 32 : 20, 10, isDesktop ? 32 : 20, 28),
+      padding: EdgeInsets.fromLTRB(isDesktop ? 30 : 20, 14, isDesktop ? 30 : 20, 26),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Good morning,', style: Theme.of(context).textTheme.bodyMedium),
-            Text('Your books at a glance', style: Theme.of(context).textTheme.headlineMedium),
+            Text(dateLabel.toUpperCase(), style: const TextStyle(fontSize: 10, letterSpacing: 1.3, fontWeight: FontWeight.w700, color: BrandColors.muted)),
+            const SizedBox(height: 6),
+            Text('Good morning', style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 3),
+            Text('Here’s your ledger position for $_activeYear.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: BrandColors.muted)),
           ])),
-          if (isDesktop) FilledButton.icon(onPressed: _addCustomer, icon: const Icon(Icons.add), label: const Text('New customer')),
+          if (isDesktop) ...[
+            OutlinedButton.icon(onPressed: _addCustomer, icon: const Icon(Icons.person_add_alt_1_outlined), label: const Text('Customer')),
+            const SizedBox(width: 9),
+            FilledButton.icon(onPressed: _addEntry, icon: const Icon(Icons.add_rounded), label: const Text('New entry')),
+          ],
         ]),
-        const SizedBox(height: 24),
+        const SizedBox(height: 22),
+        _welcomeBanner(debit, credit),
+        const SizedBox(height: 16),
         LayoutBuilder(builder: (context, constraints) {
-          final cols = constraints.maxWidth > 920 ? 4 : constraints.maxWidth > 560 ? 2 : 1;
-          const gap = 14.0;
-          final width = (constraints.maxWidth - gap * (cols - 1)) / cols;
+          final columns = constraints.maxWidth >= 1000 ? 4 : constraints.maxWidth >= 440 ? 2 : 1;
+          const gap = 12.0;
+          final cardWidth = (constraints.maxWidth - gap * (columns - 1)) / columns;
           return Wrap(spacing: gap, runSpacing: gap, children: [
-            SizedBox(width: width, child: _statCard('Customers', '${_customers.where((item) => item.year == _activeYear).length}', 'in active year', Icons.people_outline_rounded, BrandColors.teal)),
-            SizedBox(width: width, child: _statCard('Stock ledgers', '${_customers.where((item) => item.year == _activeYear && item.isStockLedger).length}', 'Including weight ledgers', Icons.inventory_2_outlined, BrandColors.gold)),
-            SizedBox(width: width, child: _statCard('Ledger year', '$_activeYear', 'Selected workspace year', Icons.calendar_month_outlined, const Color(0xFFE38E7B))),
-            SizedBox(width: width, child: _statCard('Entries', '${_entries.length}', 'Across this workspace', Icons.bolt_rounded, const Color(0xFFA6A0FF))),
+            SizedBox(width: cardWidth, child: _statCard('Customers', '${activeCustomers.length}', 'Active this year', Icons.people_outline_rounded, BrandColors.teal)),
+            SizedBox(width: cardWidth, child: _statCard('Total debit', _compactRupees(debit), 'Receivable / buys', Icons.south_west_rounded, BrandColors.teal)),
+            SizedBox(width: cardWidth, child: _statCard('Total credit', _compactRupees(credit), 'Payable / sells', Icons.north_east_rounded, BrandColors.gold)),
+            SizedBox(width: cardWidth, child: _statCard('Entries', '${activeEntries.length}', 'Across active year', Icons.receipt_long_outlined, BrandColors.ink)),
           ]);
         }),
-        const SizedBox(height: 24),
+        const SizedBox(height: 18),
         LayoutBuilder(builder: (context, constraints) {
-          final split = constraints.maxWidth > 820;
+          final split = constraints.maxWidth >= 850;
           return Flex(direction: split ? Axis.horizontal : Axis.vertical, crossAxisAlignment: CrossAxisAlignment.start, children: [
             ExpandedIf(split, child: _recentActivity(context)),
-            if (split) const SizedBox(width: 16) else const SizedBox(height: 16),
+            if (split) const SizedBox(width: 14) else const SizedBox(height: 14),
             ExpandedIf(split, child: _quickPanel(context)),
           ]);
         }),
         if (!isDesktop) ...[
-          const SizedBox(height: 18),
-          SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _addCustomer, icon: const Icon(Icons.add), label: const Text('Add customer'))),
+          const SizedBox(height: 13),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(onPressed: _addCustomer, icon: const Icon(Icons.person_add_alt_1_outlined), label: const Text('Customer'))),
+            const SizedBox(width: 10),
+            Expanded(child: FilledButton.icon(onPressed: _addEntry, icon: const Icon(Icons.add_rounded), label: const Text('New entry'))),
+          ]),
         ],
       ]),
     );
   }
+
+  Widget _welcomeBanner(double debit, double credit) {
+    final balance = debit - credit;
+    final balanceText = balance == 0 ? 'Settled' : '${balance > 0 ? 'You are owed' : 'You owe'} Rs ${_compactRupees(balance.abs())}';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFF174D3F), Color(0xFF236B54)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('YOUR BUSINESS, IN BALANCE', style: TextStyle(fontSize: 10, letterSpacing: 1.5, color: Color(0xFFC4E5D6), fontWeight: FontWeight.w700)),
+          const SizedBox(height: 7),
+          Text(balanceText, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700, color: Colors.white)),
+          const SizedBox(height: 4),
+          const Text('A clear view of every customer account.', style: TextStyle(fontSize: 12, color: Color(0xFFD5E9E0))),
+        ])),
+        const SizedBox(width: 15),
+        Container(
+          width: 50,
+          height: 50,
+          decoration: BoxDecoration(color: const Color(0x1FFFFFFF), borderRadius: BorderRadius.circular(15)),
+          child: const Icon(Icons.account_balance_wallet_outlined, color: Color(0xFFE3C27E), size: 26),
+        ),
+      ]),
+    );
+  }
+
+  String _compactRupees(double amount) {
+    final abs = amount.abs();
+    if (abs >= 10000000) return '${(amount / 10000000).toStringAsFixed(1)} Cr';
+    if (abs >= 100000) return '${(amount / 100000).toStringAsFixed(1)} L';
+    if (abs >= 1000) return '${(amount / 1000).toStringAsFixed(1)} K';
+    return amount.toStringAsFixed(0);
+  }
+
+  String _weekday(int weekday) => const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
+  String _month(int month) => const ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1];
 
   Widget _customersView(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -178,7 +309,14 @@ class _DashboardPageState extends State<DashboardPage> {
       key: const ValueKey('customers'),
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Customers', style: Theme.of(context).textTheme.headlineMedium),
+        Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Customers', style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 3),
+            Text('${filtered.length} accounts', style: Theme.of(context).textTheme.labelMedium),
+          ])),
+          FilledButton.icon(onPressed: _addCustomer, icon: const Icon(Icons.add_rounded), label: const Text('Add customer')),
+        ]),
         const SizedBox(height: 16),
         Row(children: [
           Expanded(child: TextField(onChanged: (value) => setState(() => _query = value), decoration: const InputDecoration(hintText: 'Search names…', prefixIcon: Icon(Icons.search)))),
@@ -383,49 +521,94 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _statCard(String label, String value, String detail, IconData icon, Color accent) => Card(
         child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [Icon(icon, color: accent), const Spacer(), Text(detail, style: const TextStyle(fontSize: 11, color: BrandColors.muted))]),
-            const SizedBox(height: 22),
-            Text(value, style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w700, letterSpacing: -0.5)),
-            const SizedBox(height: 4), Text(label, style: const TextStyle(color: BrandColors.muted)),
+          padding: const EdgeInsets.all(15),
+          child: Row(children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(color: BrandColors.mint, borderRadius: BorderRadius.circular(13)),
+              child: Icon(icon, color: accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: BrandColors.ink)),
+              const SizedBox(height: 2),
+              Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: BrandColors.ink)),
+              Text(detail, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: BrandColors.muted)),
+            ])),
           ]),
         ),
       );
 
-  Widget _recentActivity(BuildContext context) => Card(
-        child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [Expanded(child: Text('Recent activity', style: Theme.of(context).textTheme.titleLarge)), const Text('View all', style: TextStyle(color: BrandColors.teal))]),
-          const SizedBox(height: 8),
-          if (_entries.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: Text('Your saved entries will appear here.', style: TextStyle(color: BrandColors.muted))))
-          else
-            for (final entry in (_entries.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt))).take(4))
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const CircleAvatar(backgroundColor: BrandColors.elevated, child: Icon(Icons.receipt_long_outlined, size: 18)),
-                title: Text(_customerName(entry.customerId)),
-                subtitle: Text('${entry.description.isEmpty ? 'Ledger entry' : entry.description}  ·  ${entry.createdAt.hour.toString().padLeft(2, '0')}:${entry.createdAt.minute.toString().padLeft(2, '0')}'),
-                trailing: Text('Rs ${(entry.debit + entry.credit).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600)),
-              ),
-        ])),
-      );
+  Widget _recentActivity(BuildContext context) {
+    final activeIds = _customers.where((customer) => customer.year == _activeYear).map((customer) => customer.id).toSet();
+    final recent = _entries.where((entry) => activeIds.contains(entry.customerId)).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return Card(
+      child: Padding(padding: const EdgeInsets.fromLTRB(18, 17, 18, 13), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Recent activity', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 2),
+            const Text('Latest entries in this ledger year', style: TextStyle(fontSize: 11, color: BrandColors.muted)),
+          ])),
+          TextButton(onPressed: () => setState(() => _selected = 3), child: const Text('View all')),
+        ]),
+        const SizedBox(height: 8),
+        if (recent.isEmpty)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 18), child: Center(child: Column(children: [
+            Container(width: 46, height: 46, decoration: const BoxDecoration(color: BrandColors.mint, shape: BoxShape.circle), child: const Icon(Icons.receipt_long_outlined, color: BrandColors.teal)),
+            const SizedBox(height: 10),
+            const Text('No entries yet', style: TextStyle(fontWeight: FontWeight.w700, color: BrandColors.ink)),
+            const SizedBox(height: 3),
+            const Text('Add your first transaction to see activity here.', style: TextStyle(fontSize: 11, color: BrandColors.muted), textAlign: TextAlign.center),
+            const SizedBox(height: 9),
+            OutlinedButton.icon(onPressed: _addEntry, icon: const Icon(Icons.add, size: 17), label: const Text('Create entry')),
+          ])))
+        else
+          for (final entry in recent.take(5))
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: BrandColors.elevated, borderRadius: BorderRadius.circular(11)), child: const Icon(Icons.receipt_outlined, color: BrandColors.teal, size: 18)),
+              title: Text(_customerName(entry.customerId), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              subtitle: Text(entry.description.isEmpty ? _dateLabel(entry.entryDate) : '${entry.description} · ${_dateLabel(entry.entryDate)}', maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: Text('${entry.debit > 0 ? '−' : '+'} Rs ${_compactRupees(entry.debit > 0 ? entry.debit : entry.credit)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: entry.debit > 0 ? BrandColors.coral : BrandColors.teal)),
+              onTap: () {
+                for (final customer in _customers) {
+                  if (customer.id == entry.customerId) {
+                    _openLedger(customer);
+                    break;
+                  }
+                }
+              },
+            ),
+      ])),
+    );
+  }
+
+  String _dateLabel(DateTime date) => '${date.day.toString().padLeft(2, '0')} ${_month(date.month)} ${date.year}';
 
   Widget _quickPanel(BuildContext context) => Card(
-        child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child: Padding(padding: const EdgeInsets.fromLTRB(18, 17, 18, 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Quick actions', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 16),
-          _quickAction(Icons.person_add_alt_1_rounded, 'Add a customer', 'Create a new ledger', _addCustomer),
+          const SizedBox(height: 3),
+          const Text('Common tasks, one tap away', style: TextStyle(fontSize: 11, color: BrandColors.muted)),
+          const SizedBox(height: 8),
+          _quickAction(Icons.person_add_alt_1_rounded, 'Add a customer', 'Set up a new account', _addCustomer),
           _quickAction(Icons.note_add_outlined, 'New entry', 'Record debit or credit', _addEntry),
           _quickAction(Icons.backup_outlined, 'Back up data', 'Save workspace JSON', _createBackup),
         ])),
       );
 
   Widget _quickAction(IconData icon, String title, String subtitle, VoidCallback onTap) => ListTile(
+        dense: true,
         contentPadding: EdgeInsets.zero,
         onTap: onTap,
-        leading: Container(width: 42, height: 42, decoration: BoxDecoration(color: BrandColors.elevated, borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: BrandColors.teal, size: 20)),
-        title: Text(title), subtitle: Text(subtitle), trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+        leading: Container(width: 38, height: 38, decoration: BoxDecoration(color: BrandColors.mint, borderRadius: BorderRadius.circular(11)), child: Icon(icon, color: BrandColors.teal, size: 19)),
+        title: Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),
+        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 13, color: BrandColors.muted),
       );
 
   Future<void> _addCustomer() => _customerForm();
