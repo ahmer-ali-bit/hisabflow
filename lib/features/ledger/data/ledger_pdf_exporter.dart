@@ -48,7 +48,7 @@ class LedgerPdfExporter {
         padding: const pw.EdgeInsets.only(bottom: 8),
         decoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300))),
         child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-          pw.Text(companyName.trim().isEmpty ? 'HisabFlow' : companyName.trim(), style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.teal800)),
+          pw.Text(companyName.trim().isEmpty ? 'HisabFlow' : companyName.trim(), style: const pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.teal800)),
           pw.Text('Customer statement · ${customer.year}', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
         ]),
       ),
@@ -59,7 +59,7 @@ class LedgerPdfExporter {
       ),
       build: (context) => [
         pw.SizedBox(height: 12),
-        pw.Text(customer.name, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+        pw.Text(customer.name, style: const pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
         pw.SizedBox(height: 5),
         pw.Text('${isStock ? 'Stock' : 'General'} ledger${customer.phone.isEmpty ? '' : ' · ${customer.phone}'}', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
         pw.SizedBox(height: 12),
@@ -68,13 +68,13 @@ class LedgerPdfExporter {
           _metric('Opening credit', customer.openingCredit),
           _metric('Debit total', totals.debit),
           _metric('Credit total', totals.credit),
-          pw.Text('Balance ${_balance(totals.balance)}', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+          pw.Text('Balance ${_balance(totals.balance)}', style: const pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
         ]),
         pw.SizedBox(height: 12),
         pw.TableHelper.fromTextArray(
           headers: headers,
           data: data,
-          headerStyle: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+          headerStyle: const pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
           headerDecoration: const pw.BoxDecoration(color: PdfColors.teal800),
           cellStyle: const pw.TextStyle(fontSize: 7),
           cellPadding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4),
