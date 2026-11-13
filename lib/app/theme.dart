@@ -25,7 +25,7 @@ ThemeData buildHisabTheme() {
       onSurface: const Color(0xFFEAF1EF),
     ),
     scaffoldBackgroundColor: BrandColors.canvas,
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: BrandColors.surface,
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),

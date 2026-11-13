@@ -4,7 +4,7 @@ Offline-first, cross-platform ledger app built with Flutter. Responsive navigati
 
 ## Development
 
-Requires Flutter 3.22+ and Dart 3.4+. Generate native platform runner folders once, then fetch dependencies:
+Requires Flutter 3.32+ and Dart 3.8+. Generate native platform runner folders once, then fetch dependencies:
 
 ```sh
 ./tool/bootstrap_platforms.sh

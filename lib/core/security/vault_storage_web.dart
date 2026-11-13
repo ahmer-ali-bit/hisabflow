@@ -1,4 +1,3 @@
-import 'package:sembast/sembast.dart';
 import 'package:sembast_web/sembast_web.dart';
 
 const _databaseName = 'hisabflow_vault.db';

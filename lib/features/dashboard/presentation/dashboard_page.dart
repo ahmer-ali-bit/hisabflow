@@ -117,7 +117,7 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(width: 8),
           IconButton.filledTonal(onPressed: () => _showMessage('Linked-device pairing will be available after secure server setup.'), icon: const Icon(Icons.devices_outlined), tooltip: 'Linked devices'),
           const SizedBox(width: 8),
-          CircleAvatar(backgroundColor: BrandColors.elevated, child: const Icon(Icons.person_outline_rounded)),
+          const CircleAvatar(backgroundColor: BrandColors.elevated, child: Icon(Icons.person_outline_rounded)),
         ]),
       );
 
@@ -239,7 +239,7 @@ class _DashboardPageState extends State<DashboardPage> {
         children: [
           Text('Workspace settings', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 18),
-          Card(child: ListTile(leading: const Icon(Icons.lock_outline, color: BrandColors.teal), title: const Text('Encrypted local storage'), subtitle: const Text('AES-256-GCM · device-held key'))),
+          const Card(child: ListTile(leading: Icon(Icons.lock_outline, color: BrandColors.teal), title: Text('Encrypted local storage'), subtitle: Text('AES-256-GCM · device-held key'))),
           const SizedBox(height: 10),
           Card(child: ListTile(leading: const Icon(Icons.calendar_month_outlined), title: const Text('Active ledger year'), subtitle: Text('$_activeYear'))),
           const SizedBox(height: 10),
@@ -301,7 +301,7 @@ class _DashboardPageState extends State<DashboardPage> {
             for (final entry in (_entries.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt))).take(4))
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: CircleAvatar(backgroundColor: BrandColors.elevated, child: const Icon(Icons.receipt_long_outlined, size: 18)),
+                leading: const CircleAvatar(backgroundColor: BrandColors.elevated, child: Icon(Icons.receipt_long_outlined, size: 18)),
                 title: Text(_customerName(entry.customerId)),
                 subtitle: Text('${entry.description.isEmpty ? 'Ledger entry' : entry.description}  ·  ${entry.createdAt.hour.toString().padLeft(2, '0')}:${entry.createdAt.minute.toString().padLeft(2, '0')}'),
                 trailing: Text('Rs ${(entry.debit + entry.credit).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -388,7 +388,7 @@ class _DashboardPageState extends State<DashboardPage> {
       title: const Text('New ledger entry'),
       content: SizedBox(width: 460, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         DropdownButtonFormField<LedgerCustomer>(
-          value: customer,
+          initialValue: customer,
           decoration: const InputDecoration(labelText: 'Customer'),
           items: customers.map((item) => DropdownMenuItem(value: item, child: Text(item.name))).toList(),
           onChanged: (item) { if (item != null) setDialogState(() => customer = item); },
