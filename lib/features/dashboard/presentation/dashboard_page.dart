@@ -23,6 +23,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final _repository = LocalLedgerRepository();
   int _selected = 0;
   String _query = '';
+  String _summaryQuery = '';
   int _activeYear = DateTime.now().year;
   bool _loading = true;
   List<LedgerCustomer> _customers = [];
@@ -59,7 +60,8 @@ class _DashboardPageState extends State<DashboardPage> {
     final content = switch (_selected) {
       0 => _overview(context),
       1 => _customersView(context),
-      2 => _dailyLogsView(context),
+      2 => _summaryView(context),
+      3 => _dailyLogsView(context),
       _ => _settingsView(context),
     };
     return Scaffold(
@@ -78,6 +80,7 @@ class _DashboardPageState extends State<DashboardPage> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.grid_view_rounded), label: 'Overview'),
           NavigationDestination(icon: Icon(Icons.people_alt_outlined), label: 'Customers'),
+          NavigationDestination(icon: Icon(Icons.summarize_outlined), label: 'Summary'),
           NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Daily log'),
           NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Settings'),
         ],
@@ -96,6 +99,7 @@ class _DashboardPageState extends State<DashboardPage> {
             destinations: const [
               NavigationRailDestination(icon: Icon(Icons.grid_view_rounded), label: Text('Overview')),
               NavigationRailDestination(icon: Icon(Icons.people_alt_outlined), label: Text('Customers')),
+              NavigationRailDestination(icon: Icon(Icons.summarize_outlined), label: Text('Summary')),
               NavigationRailDestination(icon: Icon(Icons.receipt_long_outlined), label: Text('Daily log')),
               NavigationRailDestination(icon: Icon(Icons.tune_rounded), label: Text('Settings')),
             ],
@@ -207,6 +211,95 @@ class _DashboardPageState extends State<DashboardPage> {
         )),
       ]),
     );
+  }
+
+  Widget _summaryView(BuildContext context) {
+    final included = <({LedgerCustomer customer, LedgerTotals totals, String pageNumber})>[];
+    var overallDebit = 0.0;
+    var overallCredit = 0.0;
+    for (final customer in _customers.where((item) => item.year == _activeYear)) {
+      final customerEntries = _entries.where((entry) => entry.customerId == customer.id).toList();
+      final totals = LedgerCalculator.totals(customer, customerEntries);
+      final hasOpening = customer.openingDebit != 0 || customer.openingCredit != 0 || customer.openingBuyQuantity != 0 || customer.openingSellQuantity != 0;
+      if (customerEntries.isEmpty && !hasOpening) continue;
+      overallDebit += totals.debit;
+      overallCredit += totals.credit;
+      customerEntries.sort((a, b) {
+        final byDate = b.entryDate.compareTo(a.entryDate);
+        return byDate != 0 ? byDate : b.createdAt.compareTo(a.createdAt);
+      });
+      included.add((customer: customer, totals: totals, pageNumber: customerEntries.isEmpty ? '—' : (customerEntries.last.pageNumber ?? '—')));
+    }
+    included.sort((a, b) => a.customer.name.toLowerCase().compareTo(b.customer.name.toLowerCase()));
+    final query = _summaryQuery.trim().toLowerCase();
+    final displayed = included.where((row) => row.customer.name.toLowerCase().contains(query)).toList();
+    final overallBalance = overallDebit - overallCredit;
+
+    return Padding(
+      key: const ValueKey('summary'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text('Year summary · $_activeYear', style: Theme.of(context).textTheme.headlineMedium)),
+          IconButton.filledTonal(onPressed: _loadCustomers, tooltip: 'Refresh summary', icon: const Icon(Icons.refresh_rounded)),
+        ]),
+        const SizedBox(height: 14),
+        LayoutBuilder(builder: (context, constraints) {
+          final columns = constraints.maxWidth >= 760 ? 3 : 1;
+          final gap = 10.0;
+          final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+          return Wrap(spacing: gap, runSpacing: gap, children: [
+            SizedBox(width: width, child: _summaryTotalCard('Overall debit / buy', overallDebit, BrandColors.teal)),
+            SizedBox(width: width, child: _summaryTotalCard('Overall credit / sell', overallCredit, BrandColors.gold)),
+            SizedBox(width: width, child: _summaryBalanceCard(overallBalance)),
+          ]);
+        }),
+        const SizedBox(height: 14),
+        TextField(
+          onChanged: (value) => setState(() => _summaryQuery = value),
+          decoration: const InputDecoration(hintText: 'Search customer name…', prefixIcon: Icon(Icons.search)),
+        ),
+        const SizedBox(height: 12),
+        Expanded(child: displayed.isEmpty
+          ? Center(child: Text(included.isEmpty ? 'No activity or opening balances in $_activeYear.' : 'No customers match the search.'))
+          : ListView.separated(
+              itemCount: displayed.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final row = displayed[index];
+                final balance = row.totals.summaryBalance;
+                final label = balance == 0 ? '0' : '${balance.abs().toStringAsFixed(2)} ${balance > 0 ? 'D' : 'C'}';
+                return Card(child: ListTile(
+                  onTap: () => _openLedger(row.customer),
+                  title: Text(row.customer.name),
+                  subtitle: Text('${row.customer.isStockLedger ? 'Stock' : 'Ledger'} · Page ${row.pageNumber}'),
+                  trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text('D ${row.totals.debit.toStringAsFixed(2)}', style: const TextStyle(color: BrandColors.teal, fontWeight: FontWeight.w600)),
+                    Text('C ${row.totals.credit.toStringAsFixed(2)}', style: const TextStyle(color: BrandColors.gold)),
+                    Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ]),
+                ));
+              },
+            )),
+      ]),
+    );
+  }
+
+  Widget _summaryTotalCard(String title, double value, Color color) => Card(
+        child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(color: BrandColors.muted)),
+          const SizedBox(height: 8),
+          Text('Rs ${value.toStringAsFixed(2)}', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: color)),
+        ])),
+      );
+
+  Widget _summaryBalanceCard(double balance) {
+    final label = balance == 0 ? '0' : '${balance.abs().toStringAsFixed(2)} ${balance > 0 ? 'D' : 'C'}';
+    return Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Overall balance', style: TextStyle(color: BrandColors.muted)),
+      const SizedBox(height: 8),
+      Text(label, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+    ])));
   }
 
   Widget _dailyLogsView(BuildContext context) {
