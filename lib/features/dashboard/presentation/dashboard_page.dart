@@ -192,7 +192,16 @@ class _DashboardPageState extends State<DashboardPage> {
               leading: CircleAvatar(backgroundColor: BrandColors.elevated, child: Text(customer.name.substring(0, 1).toUpperCase())),
               title: Text(customer.name),
               subtitle: Text(customer.isStockLedger ? (customer.useWeight ? 'Stock · Weight ledger' : 'Stock ledger') : 'General ledger'),
-              trailing: const Icon(Icons.chevron_right_rounded),
+              trailing: PopupMenuButton<String>(
+                onSelected: (action) {
+                  if (action == 'edit') _editCustomer(customer);
+                  if (action == 'delete') _deleteCustomer(customer);
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'edit', child: Text('Edit customer')),
+                  PopupMenuItem(value: 'delete', child: Text('Delete customer')),
+                ],
+              ),
             ));
           },
         )),
@@ -326,27 +335,89 @@ class _DashboardPageState extends State<DashboardPage> {
         title: Text(title), subtitle: Text(subtitle), trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
       );
 
-  void _addCustomer() {
-    final nameController = TextEditingController();
-    showDialog<void>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Add customer'),
-      content: TextField(controller: nameController, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Customer name')),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: () async {
-        final name = nameController.text.trim();
-        if (name.isEmpty) return;
-        if (_customers.any((item) => item.year == _activeYear && item.name.toLowerCase() == name.toLowerCase())) {
-          _showMessage('A customer with this name already exists in $_activeYear');
-          return;
-        }
-        try {
-          await _repository.addCustomer(name: name, year: _activeYear);
-          await _loadCustomers();
-          if (context.mounted) Navigator.pop(context);
-        } catch (error) {
-          _showMessage('$error');
-        }
-      }, child: const Text('Add'))],
+  Future<void> _addCustomer() => _customerForm();
+
+  Future<void> _editCustomer(LedgerCustomer customer) => _customerForm(existing: customer);
+
+  Future<void> _customerForm({LedgerCustomer? existing}) async {
+    final name = TextEditingController(text: existing?.name ?? '');
+    final phone = TextEditingController(text: existing?.phone ?? '');
+    final address = TextEditingController(text: existing?.address ?? '');
+    var stock = existing?.isStockLedger ?? false;
+    var weight = existing?.useWeight ?? false;
+    await showDialog<void>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+      title: Text(existing == null ? 'Add customer' : 'Edit customer'),
+      content: SizedBox(width: 480, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: name, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Customer name *')),
+        const SizedBox(height: 10),
+        TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone (optional)')),
+        const SizedBox(height: 10),
+        TextField(controller: address, maxLines: 2, decoration: const InputDecoration(labelText: 'Address (optional)')),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: stock,
+          title: const Text('Stock ledger'),
+          onChanged: (value) => setDialogState(() { stock = value; if (!stock) weight = false; }),
+        ),
+        if (stock) SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: weight,
+          title: const Text('Weight mode'),
+          subtitle: const Text('Weight is stored internally in kilograms.'),
+          onChanged: (value) => setDialogState(() => weight = value),
+        ),
+      ]))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+        FilledButton(onPressed: () async {
+          final normalizedName = name.text.trim();
+          if (normalizedName.isEmpty) { _showMessage('Customer name is required.'); return; }
+          final model = LedgerCustomer(
+            id: existing?.id ?? '',
+            name: normalizedName,
+            year: existing?.year ?? _activeYear,
+            phone: phone.text.trim(),
+            address: address.text.trim(),
+            isStockLedger: stock,
+            useWeight: stock && weight,
+            openingDebit: existing?.openingDebit ?? 0,
+            openingCredit: existing?.openingCredit ?? 0,
+            openingBuyQuantity: existing?.openingBuyQuantity ?? 0,
+            openingSellQuantity: existing?.openingSellQuantity ?? 0,
+          );
+          try {
+            if (existing == null) {
+              await _repository.addCustomer(name: model.name, year: model.year, phone: model.phone, address: model.address, isStock: model.isStockLedger, useWeight: model.useWeight);
+            } else {
+              await _repository.updateCustomer(model);
+            }
+            await _loadCustomers();
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+          } catch (error) {
+            _showMessage('$error');
+          }
+        }, child: Text(existing == null ? 'Add customer' : 'Save changes')),
+      ],
+    )));
+    name.dispose();
+    phone.dispose();
+    address.dispose();
+  }
+
+  Future<void> _deleteCustomer(LedgerCustomer customer) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete customer?'),
+      content: Text('Permanently delete ${customer.name} and all of their ledger entries? This cannot be undone.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete'))],
     ));
+    if (confirmed != true) return;
+    try {
+      await _repository.deleteCustomer(customer.id);
+      await _loadCustomers();
+      _showMessage('Customer and related entries deleted.');
+    } catch (error) {
+      _showMessage('Delete failed: $error');
+    }
   }
 
   double _parseNumber(String value) => value.trim().isEmpty ? 0 : (double.tryParse(value.trim()) ?? double.nan);

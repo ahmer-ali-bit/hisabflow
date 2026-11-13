@@ -90,6 +90,33 @@ class LocalLedgerRepository {
     await _vault.write(data);
   }
 
+  Future<void> updateCustomer(LedgerCustomer customer) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final rows = (workspace['customers'] as List).whereType<Map>().toList();
+    final normalized = customer.name.trim();
+    if (normalized.isEmpty) throw ArgumentError('Customer name is required.');
+    if (rows.any((row) => '${row['id']}' != customer.id && '${row['year'] ?? row['ledgerYear']}' == '${customer.year}' && '${row['name']}'.trim().toLowerCase() == normalized.toLowerCase())) {
+      throw StateError('A customer with this name already exists in this year.');
+    }
+    final index = rows.indexWhere((row) => '${row['id']}' == customer.id);
+    if (index < 0) throw StateError('Customer not found.');
+    rows[index] = customer.toJson();
+    workspace['customers'] = rows;
+    await _vault.write(data);
+  }
+
+  Future<void> deleteCustomer(String customerId) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final customers = (workspace['customers'] as List).whereType<Map>().toList();
+    if (!customers.any((row) => '${row['id']}' == customerId)) throw StateError('Customer not found.');
+    workspace['customers'] = customers.where((row) => '${row['id']}' != customerId).toList();
+    final entries = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    workspace['entries'] = entries.where((row) => '${row['customerId'] ?? row['customer_id']}' != customerId).toList();
+    await _vault.write(data);
+  }
+
   Future<void> addEntry(LedgerEntry entry, {required bool stockLedger}) async {
     final issue = LedgerCalculator.validateEntry(
       debit: entry.debit,
