@@ -117,6 +117,62 @@ class LocalLedgerRepository {
     await _vault.write(data);
   }
 
+  Future<void> updateEntry(LedgerEntry entry, {required bool stockLedger}) async {
+    final issue = LedgerCalculator.validateEntry(
+      debit: entry.debit,
+      credit: entry.credit,
+      stock: stockLedger,
+      buyQuantity: entry.buyQuantity,
+      sellQuantity: entry.sellQuantity,
+    );
+    if (issue != null) throw ArgumentError(issue);
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final rows = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final index = rows.indexWhere((row) => '${row['id']}' == entry.id);
+    if (index < 0) throw StateError('Entry not found.');
+    final stored = LedgerEntry.fromJson(Map<String, dynamic>.from(rows[index]));
+    rows[index] = LedgerEntry(
+      id: stored.id,
+      customerId: entry.customerId,
+      entryDate: entry.entryDate,
+      createdAt: stored.createdAt,
+      pageNumber: entry.pageNumber,
+      description: entry.description,
+      debit: entry.debit,
+      credit: entry.credit,
+      buyQuantity: entry.buyQuantity,
+      sellQuantity: entry.sellQuantity,
+      dailyLogVisible: stored.dailyLogVisible,
+    ).toJson();
+    workspace['entries'] = rows;
+    await _vault.write(data);
+  }
+
+  Future<void> transferEntry(String entryId, String destinationCustomerId) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final customers = (workspace['customers'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    if (!customers.any((row) => '${row['id']}' == destinationCustomerId)) throw StateError('Destination customer not found.');
+    final rows = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final index = rows.indexWhere((row) => '${row['id']}' == entryId);
+    if (index < 0) throw StateError('Entry not found.');
+    final stored = LedgerEntry.fromJson(Map<String, dynamic>.from(rows[index]));
+    rows[index] = stored.copyWith(customerId: destinationCustomerId).toJson();
+    workspace['entries'] = rows;
+    await _vault.write(data);
+  }
+
+  Future<void> deleteEntry(String entryId) async {
+    final data = await load();
+    final workspace = _activeWorkspace(data);
+    final rows = (workspace['entries'] as List? ?? <Object?>[]).whereType<Map>().toList();
+    final remaining = rows.where((row) => '${row['id']}' != entryId).toList();
+    if (remaining.length == rows.length) throw StateError('Entry not found.');
+    workspace['entries'] = remaining;
+    await _vault.write(data);
+  }
+
   Future<void> addEntry(LedgerEntry entry, {required bool stockLedger}) async {
     final issue = LedgerCalculator.validateEntry(
       debit: entry.debit,

@@ -490,33 +490,191 @@ class _DashboardPageState extends State<DashboardPage> {
       );
 
   Future<void> _openLedger(LedgerCustomer customer) async {
-    final customerEntries = _entries.where((entry) => entry.customerId == customer.id).toList()
-      ..sort((a, b) {
+    var entries = _entries.where((entry) => entry.customerId == customer.id).toList();
+    var filter = 'All';
+    DateTime? customStart;
+    DateTime? customEnd;
+    await showDialog<void>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (context, setDialogState) {
+      final filtered = _filterLedgerEntries(entries, filter, customStart, customEnd);
+      final totals = LedgerCalculator.totals(customer, filtered);
+      final chronological = [...filtered]..sort((a, b) {
         final byDate = a.entryDate.compareTo(b.entryDate);
         return byDate != 0 ? byDate : a.createdAt.compareTo(b.createdAt);
       });
-    final totals = LedgerCalculator.totals(customer, customerEntries);
-    await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
-      title: Text(customer.name),
-      content: SizedBox(width: 720, height: 480, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('${customer.isStockLedger ? 'Stock ledger' : 'General ledger'}  ·  ${customerEntries.length} entries'),
-        const SizedBox(height: 8),
-        Text('Debit Rs ${totals.debit.toStringAsFixed(2)}    Credit Rs ${totals.credit.toStringAsFixed(2)}    Balance ${totals.balanceLabel}', style: const TextStyle(color: BrandColors.teal)),
-        const Divider(height: 24),
-        Expanded(child: customerEntries.isEmpty
-          ? const Center(child: Text('No entries yet.'))
-          : ListView.builder(itemCount: customerEntries.length, itemBuilder: (context, index) {
-              final entry = customerEntries[index];
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(entry.description.isEmpty ? 'Ledger entry' : entry.description),
-                subtitle: Text('${entry.entryDate.year}-${entry.entryDate.month.toString().padLeft(2, '0')}-${entry.entryDate.day.toString().padLeft(2, '0')}  ·  Page ${entry.pageNumber ?? '—'}'),
-                trailing: Text('D ${entry.debit.toStringAsFixed(2)}\nC ${entry.credit.toStringAsFixed(2)}', textAlign: TextAlign.right),
-              );
-            })),
-      ])),
-      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')), FilledButton.icon(onPressed: () { Navigator.pop(dialogContext); _addEntry(); }, icon: const Icon(Icons.add), label: const Text('New entry'))],
+      final balances = LedgerCalculator.runningBalances(customer, chronological);
+      final runningById = <String, double>{};
+      for (var index = 0; index < chronological.length; index++) {
+        runningById[chronological[index].id] = balances[index];
+      }
+      final newestFirst = [...filtered]..sort((a, b) {
+        final byDate = b.entryDate.compareTo(a.entryDate);
+        return byDate != 0 ? byDate : b.createdAt.compareTo(a.createdAt);
+      });
+      return AlertDialog(
+        title: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(customer.name),
+            Text('${customer.isStockLedger ? 'Stock' : 'General'} ledger · ${filtered.length} entries', style: Theme.of(context).textTheme.labelMedium),
+          ])),
+          IconButton(onPressed: () { Navigator.pop(dialogContext); _addEntry(initialCustomer: customer); }, icon: const Icon(Icons.add_circle_outline), tooltip: 'New entry'),
+        ]),
+        content: SizedBox(
+          width: MediaQuery.sizeOf(context).width > 980 ? 820 : MediaQuery.sizeOf(context).width * 0.82,
+          height: MediaQuery.sizeOf(context).height > 780 ? 540 : MediaQuery.sizeOf(context).height * 0.62,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Wrap(spacing: 6, runSpacing: 4, children: [
+            for (final option in const ['All', 'Today', 'This week', 'This month', 'Custom'])
+              ChoiceChip(
+                label: Text(option),
+                selected: filter == option,
+                onSelected: (_) async {
+                  if (option == 'Custom') {
+                    final start = await showDatePicker(context: context, initialDate: customStart ?? DateTime.now(), firstDate: DateTime(1900), lastDate: DateTime(9999), helpText: 'Choose start date');
+                    if (start == null || !context.mounted) return;
+                    final initialEnd = customEnd != null && !customEnd!.isBefore(start) ? customEnd! : start;
+                    final end = await showDatePicker(context: context, initialDate: initialEnd, firstDate: start, lastDate: DateTime(9999), helpText: 'Choose end date');
+                    if (end == null) return;
+                    setDialogState(() { filter = option; customStart = start; customEnd = end; });
+                  } else {
+                    setDialogState(() => filter = option);
+                  }
+                },
+              ),
+          ]),
+          if (filter == 'Custom' && customStart != null && customEnd != null)
+            Padding(padding: const EdgeInsets.only(left: 4, top: 2), child: Text('${_dateLabel(customStart!)} — ${_dateLabel(customEnd!)}', style: Theme.of(context).textTheme.labelMedium)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 7, children: [
+            _ledgerMetric('Debit', 'Rs ${totals.debit.toStringAsFixed(2)}', BrandColors.teal),
+            _ledgerMetric('Credit', 'Rs ${totals.credit.toStringAsFixed(2)}', BrandColors.gold),
+            _ledgerMetric('Balance', totals.balanceLabel, BrandColors.ink),
+          ]),
+          const Divider(height: 22),
+          Expanded(child: newestFirst.isEmpty
+            ? const Center(child: Text('No entries for this date range.'))
+            : ListView.separated(
+                itemCount: newestFirst.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final entry = newestFirst[index];
+                  final running = runningById[entry.id] ?? 0;
+                  final runningLabel = running == 0 ? '0' : '${running.abs().toStringAsFixed(2)} ${running > 0 ? 'D' : 'C'}';
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(entry.description.isEmpty ? 'Ledger entry' : entry.description, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    subtitle: Text('${_dateLabel(entry.entryDate)} · Page ${entry.pageNumber ?? '—'} · Running $runningLabel'),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        Text('D ${entry.debit.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: BrandColors.teal)),
+                        Text('C ${entry.credit.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: BrandColors.gold)),
+                      ]),
+                      PopupMenuButton<String>(
+                        onSelected: (action) async {
+                          if (action == 'edit') {
+                            Navigator.pop(dialogContext);
+                            await _addEntry(existing: entry, initialCustomer: customer);
+                          } else if (action == 'transfer') {
+                            Navigator.pop(dialogContext);
+                            await _transferEntry(entry, customer);
+                          } else if (action == 'delete') {
+                            final deleted = await _confirmDeleteEntry(entry);
+                            if (deleted && dialogContext.mounted) Navigator.pop(dialogContext);
+                          }
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Edit entry')),
+                          PopupMenuItem(value: 'transfer', child: Text('Transfer to customer')),
+                          PopupMenuItem(value: 'delete', child: Text('Delete permanently')),
+                        ],
+                      ),
+                    ]),
+                  );
+                },
+              )),
+        ])),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close'))],
+      );
+    }));
+  }
+
+  List<LedgerEntry> _filterLedgerEntries(List<LedgerEntry> entries, String filter, DateTime? start, DateTime? end) {
+    final today = DateUtils.dateOnly(DateTime.now());
+    return entries.where((entry) {
+      final date = DateUtils.dateOnly(entry.entryDate);
+      switch (filter) {
+        case 'Today':
+          return date == today;
+        case 'This week':
+          final monday = today.subtract(Duration(days: today.weekday - DateTime.monday));
+          return !date.isBefore(monday) && date.isBefore(monday.add(const Duration(days: 7)));
+        case 'This month':
+          return date.year == today.year && date.month == today.month;
+        case 'Custom':
+          if (start == null || end == null) return false;
+          return !date.isBefore(DateUtils.dateOnly(start)) && !date.isAfter(DateUtils.dateOnly(end));
+        default:
+          return true;
+      }
+    }).toList();
+  }
+
+  Widget _ledgerMetric(String title, String value, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+        decoration: BoxDecoration(color: BrandColors.canvas, borderRadius: BorderRadius.circular(10)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(fontSize: 10, color: BrandColors.muted)),
+          const SizedBox(height: 3),
+          Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+        ]),
+      );
+
+  Future<void> _transferEntry(LedgerEntry entry, LedgerCustomer source) async {
+    final targets = _customers.where((customer) => customer.year == _activeYear && customer.id != source.id).toList();
+    if (targets.isEmpty) {
+      _showMessage('Add another customer before transferring this entry.');
+      return;
+    }
+    var target = targets.first;
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+      title: const Text('Transfer entry'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Move this entry from ${source.name}? Its date, amounts, page and description will be preserved.'),
+        const SizedBox(height: 14),
+        DropdownButtonFormField<LedgerCustomer>(
+          initialValue: target,
+          decoration: const InputDecoration(labelText: 'Transfer to'),
+          items: targets.map((customer) => DropdownMenuItem(value: customer, child: Text(customer.name))).toList(),
+          onChanged: (value) { if (value != null) setDialogState(() => target = value); },
+        ),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Transfer'))],
+    )));
+    if (confirmed != true) return;
+    try {
+      await _repository.transferEntry(entry.id, target.id);
+      await _loadCustomers();
+      _showMessage('Entry transferred to ${target.name}.');
+    } catch (error) {
+      _showMessage('Transfer failed: $error');
+    }
+  }
+
+  Future<bool> _confirmDeleteEntry(LedgerEntry entry) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete entry permanently?'),
+      content: const Text('This removes the entry from the customer ledger and daily logs.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete'))],
     ));
+    if (confirmed != true) return false;
+    try {
+      await _repository.deleteEntry(entry.id);
+      await _loadCustomers();
+      _showMessage('Entry deleted.');
+      return true;
+    } catch (error) {
+      _showMessage('Delete failed: $error');
+      return false;
+    }
   }
 
   Widget _statCard(String label, String value, String detail, IconData icon, Color accent) => Card(
@@ -710,6 +868,13 @@ class _DashboardPageState extends State<DashboardPage> {
     return double.tryParse(value.trim()) ?? double.nan;
   }
 
+  LedgerCustomer? _customerForId(String id) {
+    for (final customer in _customers) {
+      if (customer.id == id) return customer;
+    }
+    return null;
+  }
+
   String _customerName(String id) {
     for (final customer in _customers) {
       if (customer.id == id) return customer.name;
@@ -717,28 +882,34 @@ class _DashboardPageState extends State<DashboardPage> {
     return 'Customer';
   }
 
-  Future<void> _addEntry() async {
+  Future<void> _addEntry({LedgerEntry? existing, LedgerCustomer? initialCustomer}) async {
     final customers = _customers.where((customer) => customer.year == _activeYear).toList();
     if (customers.isEmpty) {
       _showMessage('Add a customer before recording an entry.');
       return;
     }
-    final debit = TextEditingController();
-    final credit = TextEditingController();
-    final buyQuantity = TextEditingController();
-    final sellQuantity = TextEditingController();
-    final page = TextEditingController();
-    final description = TextEditingController();
-    var customer = customers.first;
-    var entryDate = DateTime.now();
+    final targetCustomer = initialCustomer ?? _customerForId(existing?.customerId ?? '');
+    final debit = TextEditingController(text: existing?.debit.toString() ?? '');
+    final credit = TextEditingController(text: existing?.credit.toString() ?? '');
+    final buyQuantity = TextEditingController(text: existing == null ? '' : (targetCustomer?.useWeight == true ? LedgerCalculator.formatWeightKg(existing.buyQuantity) : existing.buyQuantity.toString()));
+    final sellQuantity = TextEditingController(text: existing == null ? '' : (targetCustomer?.useWeight == true ? LedgerCalculator.formatWeightKg(existing.sellQuantity) : existing.sellQuantity.toString()));
+    final page = TextEditingController(text: existing?.pageNumber ?? '');
+    final description = TextEditingController(text: existing?.description ?? '');
+    var customer = targetCustomer ?? customers.first;
+    var entryDate = existing?.entryDate ?? DateTime.now();
     await showDialog<void>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
-      title: const Text('New ledger entry'),
+      title: Text(existing == null ? 'New ledger entry' : 'Edit ledger entry'),
       content: SizedBox(width: 460, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        DropdownButtonFormField<LedgerCustomer>(
+        if (existing == null) DropdownButtonFormField<LedgerCustomer>(
           initialValue: customer,
           decoration: const InputDecoration(labelText: 'Customer'),
           items: customers.map((item) => DropdownMenuItem(value: item, child: Text(item.name))).toList(),
           onChanged: (item) { if (item != null) setDialogState(() => customer = item); },
+        ) else ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.person_outline_rounded, color: BrandColors.teal),
+          title: Text(customer.name),
+          subtitle: const Text('Customer · transfer separately'),
         ),
         const SizedBox(height: 12),
         ListTile(
@@ -771,10 +942,10 @@ class _DashboardPageState extends State<DashboardPage> {
         TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
         FilledButton(onPressed: () async {
           final entry = LedgerEntry(
-            id: DateTime.now().microsecondsSinceEpoch.toString(),
+            id: existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
             customerId: customer.id,
             entryDate: entryDate,
-            createdAt: DateTime.now(),
+            createdAt: existing?.createdAt ?? DateTime.now(),
             pageNumber: page.text.trim().isEmpty ? null : page.text.trim(),
             description: description.text.trim(),
             debit: _parseNumber(debit.text),
@@ -785,13 +956,17 @@ class _DashboardPageState extends State<DashboardPage> {
           final issue = LedgerCalculator.validateEntry(debit: entry.debit, credit: entry.credit, stock: customer.isStockLedger, buyQuantity: entry.buyQuantity, sellQuantity: entry.sellQuantity);
           if (issue != null) { _showMessage(issue); return; }
           try {
-            await _repository.addEntry(entry, stockLedger: customer.isStockLedger);
+            if (existing == null) {
+              await _repository.addEntry(entry, stockLedger: customer.isStockLedger);
+            } else {
+              await _repository.updateEntry(entry, stockLedger: customer.isStockLedger);
+            }
             await _loadCustomers();
             if (dialogContext.mounted) Navigator.pop(dialogContext);
           } catch (error) {
             _showMessage('$error');
           }
-        }, child: const Text('Save entry')),
+        }, child: Text(existing == null ? 'Save entry' : 'Save changes')),
       ],
     )));
     debit.dispose();
