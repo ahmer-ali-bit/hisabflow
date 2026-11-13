@@ -21,18 +21,20 @@ jobs:
         shell: bash
         run: |
           set +e
-          flutter analyze --machine > "$RUNNER_TEMP/flutter-analyze.txt"
+          flutter analyze --machine > "$RUNNER_TEMP/flutter-analyze.txt" 2>&1
           analyze_status=$?
-          python3 - "$RUNNER_TEMP/flutter-analyze.txt" <<'PY'
+          ANALYZE_STATUS="$analyze_status" python3 - "$RUNNER_TEMP/flutter-analyze.txt" <<'PY'
           import os
           import pathlib
           import sys
 
           root = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
           output = pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          found = False
           for line in output.splitlines():
               fields = line.split('|', 7)
               if len(fields) == 8 and fields[0] in {'ERROR', 'WARNING', 'INFO'}:
+                  found = True
                   severity, _, code, file_path, row, col, _, message = fields
                   path = pathlib.Path(file_path)
                   try:
@@ -42,10 +44,32 @@ jobs:
                   level = {'ERROR': 'error', 'WARNING': 'warning', 'INFO': 'notice'}[severity]
                   clean = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
                   print(f'::{level} file={path},line={row},col={col}::{code}: {clean}')
-              else:
-                  print(line)
+          if not found:
+              lines = output.splitlines() or ['Flutter analyzer failed without output.']
+              level = 'error' if os.environ['ANALYZE_STATUS'] != '0' else 'notice'
+              for line in lines[-30:]:
+                  clean = line.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::{level} title=Flutter analyzer output::{clean}')
           PY
           exit "$analyze_status"
       - name: Run tests
         if: always()
-        run: flutter test --reporter expanded
+        shell: bash
+        run: |
+          set +e
+          flutter test --reporter expanded > "$RUNNER_TEMP/flutter-test.txt" 2>&1
+          test_status=$?
+          if [ "$test_status" -ne 0 ]; then
+            TEST_STATUS="$test_status" python3 - "$RUNNER_TEMP/flutter-test.txt" <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          output = pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          lines = output.splitlines() or ['Flutter tests failed without output.']
+          for line in lines[-35:]:
+              clean = line.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error title=Flutter test output::{clean}')
+          PY
+          fi
+          exit "$test_status"
