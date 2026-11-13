@@ -11,7 +11,11 @@ import 'vault_storage_stub.dart'
 /// AES-256-GCM vault; its encryption key is held in platform secure storage.
 class EncryptedVault {
   EncryptedVault({FlutterSecureStorage? secureStorage})
-      : _secureStorage = secureStorage ?? const FlutterSecureStorage();
+      : _secureStorage = secureStorage ?? const FlutterSecureStorage(
+          // Use the macOS login keychain for local/dev builds; the Data Protection
+          // keychain requires a Keychain Sharing entitlement (-34018 otherwise).
+          mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+        );
 
   static const _keyName = 'hisabflow_vault_key_v1';
   final FlutterSecureStorage _secureStorage;
