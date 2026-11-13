@@ -12,9 +12,9 @@
 
 ## Before a production release
 
-- [ ] Run `flutter analyze` and `flutter test` on a supported Flutter SDK
+- [x] Run `flutter analyze` and `flutter test` on Flutter 3.44.0 in GitHub Actions
 - [ ] Build and manually test macOS, Windows, Linux, Android, iOS and web targets
-- [ ] Add print/PDF statements and verify pagination, privacy and paper sizing
+- [ ] Manually verify PDF pagination, printer selection, privacy and paper sizing on target platforms
 - [ ] Add optional PIN/biometric app lock with platform-specific secure storage
 - [ ] Implement a signed/manual update channel appropriate to each platform
 - [ ] If linked devices are enabled, finish authenticated pairing, end-to-end key exchange, device revocation, replay protection, conflict resolution and membership-management RLS; keep sync off by default
